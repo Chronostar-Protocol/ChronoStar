@@ -1,7 +1,7 @@
 {
   "version": "1.0.0",
-  "organization": "Stellar-Ecosystem",
-  "repository": "Stellar-Program/ChronoStar",
+  "organization": "chrono-stellar",
+  "repository": "chrono-stellar/ChronoStar",
   "funding": "OnlyDust",
   "description": "Scheduled and recurring payments protocol on Stellar Soroban"
 }

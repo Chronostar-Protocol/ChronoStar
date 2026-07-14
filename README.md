@@ -2,6 +2,11 @@
 
 ![ChronoStar](docs/assets/chronostar-logo-lockup.svg)
 
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+[![Test Contracts](https://github.com/chrono-stellar/ChronoStar/actions/workflows/test-contracts.yml/badge.svg)](https://github.com/chrono-stellar/ChronoStar/actions/workflows/test-contracts.yml)
+[![Test Keeper](https://github.com/chrono-stellar/ChronoStar/actions/workflows/test-keeper.yml/badge.svg)](https://github.com/chrono-stellar/ChronoStar/actions/workflows/test-keeper.yml)
+[![Deploy Docs](https://github.com/chrono-stellar/ChronoStar/actions/workflows/deploy-docs.yml/badge.svg)](https://github.com/chrono-stellar/ChronoStar/actions/workflows/deploy-docs.yml)
+
 Time-based payment primitives for the Stellar ecosystem — scheduled vaults, recurring streams, and DCA policies.
 
 ## Deployed Contracts (Testnet)
