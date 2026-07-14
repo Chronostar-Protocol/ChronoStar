@@ -6,11 +6,16 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
-    "test": "node --test src/**/*.test.js"
+    "test": "node --test src/**/*.test.js",
+    "lint": "eslint src/"
   },
   "dependencies": {
     "@stellar/stellar-sdk": "^13.0.0",
     "pino": "^9.0.0",
     "pino-pretty": "^13.0.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "eslint": "^9.0.0"
   }
 }

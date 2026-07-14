@@ -70,7 +70,10 @@ impl RecurringStream {
     ) -> u64 {
         owner.require_auth();
         assert!(total_amount > 0, "amount must be positive");
-        assert!(duration_ledgers >= 60, "minimum duration is 60 ledgers (~5 min)");
+        assert!(
+            duration_ledgers >= 60,
+            "minimum duration is 60 ledgers (~5 min)"
+        );
 
         let token_client = token::Client::new(&env, &token);
         token_client.transfer_from(
@@ -120,9 +123,11 @@ impl RecurringStream {
         env.storage()
             .persistent()
             .set(&DataKey::StreamsByOwner(owner.clone()), &owner_streams);
-        env.storage()
-            .persistent()
-            .extend_ttl(&DataKey::StreamsByOwner(owner), 6_312_000, 6_312_000);
+        env.storage().persistent().extend_ttl(
+            &DataKey::StreamsByOwner(owner),
+            6_312_000,
+            6_312_000,
+        );
 
         let mut rec_streams: Vec<u64> = env
             .storage()
@@ -130,12 +135,15 @@ impl RecurringStream {
             .get(&DataKey::StreamsByRecipient(recipient.clone()))
             .unwrap_or(Vec::new(&env));
         rec_streams.push_back(id);
-        env.storage()
-            .persistent()
-            .set(&DataKey::StreamsByRecipient(recipient.clone()), &rec_streams);
-        env.storage()
-            .persistent()
-            .extend_ttl(&DataKey::StreamsByRecipient(recipient), 6_312_000, 6_312_000);
+        env.storage().persistent().set(
+            &DataKey::StreamsByRecipient(recipient.clone()),
+            &rec_streams,
+        );
+        env.storage().persistent().extend_ttl(
+            &DataKey::StreamsByRecipient(recipient),
+            6_312_000,
+            6_312_000,
+        );
 
         env.storage().instance().extend_ttl(100_000, 100_000);
 
@@ -159,9 +167,7 @@ impl RecurringStream {
         stream.claimed_amount += claimable;
         stream.last_claimed_ledger = current;
 
-        if stream.claimed_amount >= stream.total_amount
-            || current >= stream.end_ledger
-        {
+        if stream.claimed_amount >= stream.total_amount || current >= stream.end_ledger {
             stream.status = StreamStatus::Completed;
         }
 
@@ -233,11 +239,7 @@ impl RecurringStream {
 
         let remainder = stream.total_amount - stream.claimed_amount;
         if remainder > 0 {
-            token_client.transfer(
-                &env.current_contract_address(),
-                &stream.owner,
-                &remainder,
-            );
+            token_client.transfer(&env.current_contract_address(), &stream.owner, &remainder);
         }
 
         stream.status = StreamStatus::Cancelled;
@@ -247,9 +249,7 @@ impl RecurringStream {
     }
 
     pub fn get_stream(env: Env, stream_id: u64) -> Option<StreamEntry> {
-        env.storage()
-            .persistent()
-            .get(&DataKey::Stream(stream_id))
+        env.storage().persistent().get(&DataKey::Stream(stream_id))
     }
 
     pub fn get_claimable(env: Env, stream_id: u64) -> i128 {
@@ -280,10 +280,7 @@ impl RecurringStream {
     }
 
     pub fn stream_count(env: Env) -> u64 {
-        env.storage()
-            .instance()
-            .get(&DataKey::Counter)
-            .unwrap_or(0)
+        env.storage().instance().get(&DataKey::Counter).unwrap_or(0)
     }
 }
 
@@ -317,7 +314,9 @@ mod test {
         let recipient = Address::generate(&env);
 
         let token_admin = Address::generate(&env);
-        let token = env.register_stellar_asset_contract_v2(token_admin.clone()).address();
+        let token = env
+            .register_stellar_asset_contract_v2(token_admin.clone())
+            .address();
         let token_admin_client = TokenAdminClient::new(&env, &token);
         token_admin_client.mint(&owner, &10_000_000_000);
 

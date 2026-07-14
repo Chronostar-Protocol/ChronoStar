@@ -16,7 +16,7 @@ async function main() {
     dca: new DCAWatcher(client, config.dcaContractId),
   };
 
-  for (const [name, w] of Object.entries(watchers)) {
+  for (const [, w] of Object.entries(watchers)) {
     w.start(config.pollIntervalMs);
   }
 

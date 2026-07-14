@@ -2,7 +2,7 @@ name: Test Contracts
 
 on:
   push:
-    branches: [main]
+    branches: [master]
     paths:
       - 'contract/**'
   pull_request:
@@ -10,8 +10,21 @@ on:
       - 'contract/**'
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          target: wasm32-unknown-unknown
+      - run: cargo fmt --check
+        working-directory: contract
+      - run: cargo clippy --all-targets -- -D warnings
+        working-directory: contract
+
   test:
     runs-on: ubuntu-latest
+    needs: lint
     steps:
       - uses: actions/checkout@v5
       - uses: actions-rust-lang/setup-rust-toolchain@v1

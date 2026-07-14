@@ -66,9 +66,7 @@ impl ScheduleVault {
             .get(&DataKey::Counter)
             .unwrap_or(0u64)
             + 1;
-        env.storage()
-            .instance()
-            .set(&DataKey::Counter, &id);
+        env.storage().instance().set(&DataKey::Counter, &id);
 
         let vault = VaultEntry {
             id,
@@ -82,9 +80,7 @@ impl ScheduleVault {
             status: VaultStatus::Active,
         };
 
-        env.storage()
-            .persistent()
-            .set(&DataKey::Vault(id), &vault);
+        env.storage().persistent().set(&DataKey::Vault(id), &vault);
 
         env.storage()
             .persistent()
@@ -158,17 +154,11 @@ impl ScheduleVault {
             .set(&DataKey::Vault(vault_id), &vault);
 
         let token_client = token::Client::new(&env, &vault.token);
-        token_client.transfer(
-            &env.current_contract_address(),
-            &vault.owner,
-            &vault.amount,
-        );
+        token_client.transfer(&env.current_contract_address(), &vault.owner, &vault.amount);
     }
 
     pub fn get_vault(env: Env, vault_id: u64) -> Option<VaultEntry> {
-        env.storage()
-            .persistent()
-            .get(&DataKey::Vault(vault_id))
+        env.storage().persistent().get(&DataKey::Vault(vault_id))
     }
 
     pub fn get_vaults_by_owner(env: Env, owner: Address) -> Vec<u64> {
@@ -183,10 +173,7 @@ impl ScheduleVault {
     }
 
     pub fn vault_count(env: Env) -> u64 {
-        env.storage()
-            .instance()
-            .get(&DataKey::Counter)
-            .unwrap_or(0)
+        env.storage().instance().get(&DataKey::Counter).unwrap_or(0)
     }
 }
 
@@ -220,7 +207,9 @@ mod test {
         let recipient = Address::generate(&env);
 
         let token_admin = Address::generate(&env);
-        let token = env.register_stellar_asset_contract_v2(token_admin.clone()).address();
+        let token = env
+            .register_stellar_asset_contract_v2(token_admin.clone())
+            .address();
         let token_admin_client = TokenAdminClient::new(&env, &token);
         token_admin_client.mint(&owner, &10_000_000_000);
 

@@ -1,4 +1,4 @@
-import { rpc, Contract, xdr, Address } from '@stellar/stellar-sdk';
+import { rpc, Contract } from '@stellar/stellar-sdk';
 import { config } from './config.js';
 import { logger } from './logger.js';
 

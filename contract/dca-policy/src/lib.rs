@@ -40,6 +40,7 @@ pub struct DCAPolicy;
 
 #[contractimpl]
 impl DCAPolicy {
+    #[allow(clippy::too_many_arguments)]
     pub fn create_dca(
         env: Env,
         owner: Address,
@@ -51,7 +52,10 @@ impl DCAPolicy {
         label: String,
     ) -> u64 {
         owner.require_auth();
-        assert!(total_budget > 0 && amount_per_swap > 0, "amounts must be positive");
+        assert!(
+            total_budget > 0 && amount_per_swap > 0,
+            "amounts must be positive"
+        );
         assert!(
             total_budget % amount_per_swap == 0,
             "total_budget must be exact multiple of amount_per_swap"
@@ -194,10 +198,7 @@ impl DCAPolicy {
     }
 
     pub fn dca_count(env: Env) -> u64 {
-        env.storage()
-            .instance()
-            .get(&DataKey::Counter)
-            .unwrap_or(0)
+        env.storage().instance().get(&DataKey::Counter).unwrap_or(0)
     }
 }
 
@@ -231,7 +232,9 @@ mod test {
         let swap_receiver = Address::generate(&env);
 
         let token_admin = Address::generate(&env);
-        let token = env.register_stellar_asset_contract_v2(token_admin.clone()).address();
+        let token = env
+            .register_stellar_asset_contract_v2(token_admin.clone())
+            .address();
         let token_admin_client = TokenAdminClient::new(&env, &token);
         token_admin_client.mint(&owner, &10_000_000_000);
 

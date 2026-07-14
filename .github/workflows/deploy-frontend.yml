@@ -2,13 +2,26 @@ name: Deploy Frontend
 
 on:
   push:
-    branches: [main]
+    branches: [master]
     paths:
       - 'frontend/**'
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - run: npm install
+        working-directory: frontend
+      - run: npm run lint
+        working-directory: frontend
+
   deploy:
     runs-on: ubuntu-latest
+    needs: lint
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
