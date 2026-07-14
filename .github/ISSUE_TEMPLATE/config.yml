@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: ChronoStar Docs
+    url: https://stellar-program.github.io/ChronoStar
+    about: Check the documentation before opening an issue.
+  - name: GitHub Discussions
+    url: https://github.com/Stellar-Program/ChronoStar/discussions
+    about: Ask questions and discuss ideas here.
