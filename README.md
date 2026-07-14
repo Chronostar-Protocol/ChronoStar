@@ -133,6 +133,10 @@ chronostar/
 └── .github/workflows/     # CI/CD pipelines
 ```
 
+## Contributing
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for setup, conventions, and how to pick up a `good-first-issue`. All contributors must follow the [Code of Conduct](./CODE_OF_CONDUCT.md). See [CHANGELOG.md](./CHANGELOG.md) for release history and [ROADMAP.md](./ROADMAP.md) for upcoming milestones.
+
 ## License
 
-MIT
+MIT — see [LICENSE](./LICENSE)
