@@ -1,5 +1,7 @@
 # ChronoStar
 
+![ChronoStar](docs/assets/chronostar-logo-lockup.svg)
+
 Time-based payment primitives for the Stellar ecosystem — scheduled vaults, recurring streams, and DCA policies.
 
 ## Deployed Contracts (Testnet)
@@ -16,7 +18,7 @@ Time-based payment primitives for the Stellar ecosystem — scheduled vaults, re
 |---------|-----|
 | Frontend | https://chrono-star.vercel.app |
 | Backend API | https://chronostar-backend-s905.onrender.com |
-| Documentation | https://stellar-program.github.io/ChronoStar |
+| Documentation | https://chrono-stellar.github.io/ChronoStar |
 | Keeper Bot | Deploy via \`render.yaml\` → Render Background Worker. Set \`KEEPER_SECRET\`, \`VAULT_CONTRACT_ID\`, \`STREAM_CONTRACT_ID\`, \`DCA_CONTRACT_ID\` as Render secrets. |
 
 ## Architecture

@@ -2,14 +2,14 @@ import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 
 export default defineConfig({
-  site: 'https://stellar-program.github.io',
+  site: 'https://chrono-stellar.github.io',
   base: '/ChronoStar',
   integrations: [
     starlight({
       title: 'ChronoStar',
       description: 'Time-based payment primitives for the Stellar ecosystem.',
-      logo: { src: './src/assets/logo.svg' },
-      social: { github: 'https://github.com/Stellar-Program/ChronoStar' },
+      logo: { src: './src/assets/chronostar-logo-lockup.svg' },
+      social: { github: 'https://github.com/chrono-stellar/ChronoStar' },
       customCss: ['./src/styles/custom.css'],
       sidebar: [
         {
