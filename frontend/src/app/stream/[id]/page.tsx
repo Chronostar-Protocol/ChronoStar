@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { api } from '@/lib/api';
@@ -12,38 +12,76 @@ export default function StreamDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { address } = useWallet();
   const [stream, setStream] = useState<StreamEntry | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [txStatus, setTxStatus] = useState<null | 'pending' | 'success' | 'error'>(null);
 
-  useEffect(() => {
+  const fetchStream = useCallback(() => {
     if (!address) return;
-    api.getStreams(address).then(streams => {
-      const found = streams.find(s => s.id === Number(id));
-      if (found) setStream(found);
-    });
+    setLoading(true);
+    setError(null);
+    api.getStreams(address)
+      .then(streams => {
+        const found = streams.find(s => s.id === Number(id));
+        if (found) setStream(found);
+        else setError('Stream not found. It may have been removed.');
+      })
+      .catch(() => setError('Failed to load stream details. Please check your connection and try again.'))
+      .finally(() => setLoading(false));
   }, [address, id]);
 
-  if (!stream) return <p className="text-text-muted text-center py-20">Loading...</p>;
+  useEffect(() => {
+    fetchStream();
+  }, [fetchStream]);
 
-  const claimed = Number(stream.claimed_amount);
-  const total = Number(stream.total_amount);
+  if (loading) {
+    return <p className="text-text-muted text-center py-20">Loading...</p>;
+  }
+
+  if (error) {
+    return (
+      <div className="text-center py-20">
+        <div className="text-4xl mb-3" aria-hidden="true">&#9888;</div>
+        <h2 className="text-lg font-heading font-bold text-text-primary mb-2">Something went wrong</h2>
+        <p className="text-text-muted text-sm mb-6">{error}</p>
+        <div className="flex gap-3 justify-center">
+          <button
+            onClick={fetchStream}
+            className="px-4 py-2 rounded-lg bg-accent-blue text-white text-sm font-medium hover:opacity-90 transition-opacity"
+          >
+            Try again
+          </button>
+          <Link
+            href="/dashboard"
+            className="px-4 py-2 rounded-lg border border-border text-text-muted text-sm font-medium hover:text-text-primary transition-colors"
+          >
+            &larr; Dashboard
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  const claimed = Number(stream!.claimed_amount);
+  const total = Number(stream!.total_amount);
   const progress = total > 0 ? (claimed / total) * 100 : 0;
 
   return (
     <div className="max-w-lg mx-auto">
       <Link href="/dashboard" className="text-sm text-accent-blue hover:underline">&larr; Dashboard</Link>
-      <h1 className="text-2xl font-heading font-bold text-text-primary mt-4 mb-6">Stream #{stream.id}</h1>
+      <h1 className="text-2xl font-heading font-bold text-text-primary mt-4 mb-6">Stream #{stream!.id}</h1>
 
       <div className="space-y-3 p-4 rounded-lg border border-border bg-bg-card">
-        <DetailRow label="Label" value={stream.label} />
-        <DetailRow label="Recipient" value={stream.recipient} />
-        <DetailRow label="Total Amount" value={stream.total_amount} />
-        <DetailRow label="Claimed" value={stream.claimed_amount} />
+        <DetailRow label="Label" value={stream!.label} />
+        <DetailRow label="Recipient" value={stream!.recipient} />
+        <DetailRow label="Total Amount" value={stream!.total_amount} />
+        <DetailRow label="Claimed" value={stream!.claimed_amount} />
         <DetailRow label="Progress" value={`${progress.toFixed(1)}%`} />
-        <DetailRow label="End Ledger" value={String(stream.end_ledger)} />
-        <DetailRow label="Status" value={stream.status} />
+        <DetailRow label="End Ledger" value={String(stream!.end_ledger)} />
+        <DetailRow label="Status" value={stream!.status} />
       </div>
 
-      {stream.status === 'Active' && (
+      {stream!.status === 'Active' && (
         <button
           onClick={() => setTxStatus('pending')}
           className="mt-6 w-full py-3 rounded-lg bg-accent-green text-white font-medium hover:opacity-90"
