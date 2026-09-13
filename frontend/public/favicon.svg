@@ -1,0 +1,46 @@
+<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="starGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFD86B"/>
+      <stop offset="100%" stop-color="#F7A400"/>
+    </linearGradient>
+    <linearGradient id="ringGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#7C6CFF"/>
+      <stop offset="100%" stop-color="#3E2F8C"/>
+    </linearGradient>
+  </defs>
+
+  <circle cx="100" cy="100" r="94" fill="none" stroke="url(#ringGrad)" stroke-width="8"/>
+  <g stroke="#7C6CFF" stroke-width="4" stroke-linecap="round">
+    <line x1="100" y1="14"  x2="100" y2="30"/>
+    <line x1="100" y1="170" x2="100" y2="186"/>
+    <line x1="14"  y1="100" x2="30"  y2="100"/>
+    <line x1="170" y1="100" x2="186" y2="100"/>
+    <line x1="44" y1="44" x2="56" y2="56"/>
+    <line x1="144" y1="144" x2="156" y2="156"/>
+    <line x1="44" y1="156" x2="56" y2="144"/>
+    <line x1="144" y1="56" x2="156" y2="44"/>
+  </g>
+  <ellipse cx="100" cy="100" rx="72" ry="38" fill="none" stroke="#7C6CFF" stroke-width="2" stroke-dasharray="1.5 8" opacity="0.55" transform="rotate(-20 100 100)"/>
+  <circle cx="163" cy="72" r="4" fill="#FFD86B"/>
+  <path d="
+    M100 46
+    C104 92 104 92 100 100
+    C96 92 96 92 100 46
+    Z
+    M100 154
+    C96 108 96 108 100 100
+    C104 108 104 108 100 154
+    Z
+    M46 100
+    C92 96 92 96 100 100
+    C92 104 92 104 46 100
+    Z
+    M154 100
+    C108 104 108 104 100 100
+    C108 96 108 96 154 100
+    Z
+  " fill="url(#starGrad)"/>
+  <circle cx="100" cy="100" r="9" fill="url(#starGrad)"/>
+</svg>
+
