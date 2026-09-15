@@ -6,12 +6,14 @@ import Link from 'next/link';
 import { api } from '@/lib/api';
 import { useWallet } from '@/lib/store';
 import { TxToast } from '@/components/TxToast';
+import { DetailPageSkeleton } from '@/components/Skeleton';
 import type { StreamEntry } from '@/types';
 
 export default function StreamDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { address } = useWallet();
   const [stream, setStream] = useState<StreamEntry | null>(null);
+  const [loading, setLoading] = useState(true);
   const [txStatus, setTxStatus] = useState<null | 'pending' | 'success' | 'error'>(null);
 
   useEffect(() => {
@@ -19,10 +21,23 @@ export default function StreamDetailPage() {
     api.getStreams(address).then(streams => {
       const found = streams.find(s => s.id === Number(id));
       if (found) setStream(found);
-    });
+    }).finally(() => setLoading(false));
   }, [address, id]);
 
-  if (!stream) return <p className="text-text-muted text-center py-20">Loading...</p>;
+  if (loading) {
+    return <DetailPageSkeleton />;
+  }
+
+  if (!stream) {
+    return (
+      <div className="text-center py-20">
+        <p className="text-text-muted">Stream not found.</p>
+        <Link href="/dashboard" className="text-sm text-accent-blue hover:underline mt-2 inline-block">
+          &larr; Back to Dashboard
+        </Link>
+      </div>
+    );
+  }
 
   const claimed = Number(stream.claimed_amount);
   const total = Number(stream.total_amount);

@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { api } from '@/lib/api';
+import { ExplorerSkeleton } from '@/components/Skeleton';
 import type { ScheduleEvent } from '@/types';
 
 export default function ExplorerPage() {
@@ -13,14 +14,16 @@ export default function ExplorerPage() {
     api.getEvents(100).then(setEvents).catch(() => {}).finally(() => setLoading(false));
   }, []);
 
+  if (loading) {
+    return <ExplorerSkeleton />;
+  }
+
   return (
     <div>
       <h1 className="text-2xl font-heading font-bold text-text-primary mb-6">Explorer</h1>
       <p className="text-sm text-text-muted mb-6">Upcoming schedule events across all contracts.</p>
 
-      {loading ? (
-        <p className="text-text-muted text-center py-12">Loading...</p>
-      ) : events.length === 0 ? (
+      {events.length === 0 ? (
         <p className="text-text-muted text-center py-12">No upcoming events.</p>
       ) : (
         <div className="space-y-2">

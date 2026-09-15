@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useWallet } from '@/lib/store';
 import { api } from '@/lib/api';
+import { DashboardSkeleton } from '@/components/Skeleton';
 import type { VaultEntry, StreamEntry, DCAEntry } from '@/types';
 
 type Tab = 'vaults' | 'streams' | 'dca';
@@ -14,12 +15,22 @@ export default function DashboardPage() {
   const [vaults, setVaults] = useState<VaultEntry[]>([]);
   const [streams, setStreams] = useState<StreamEntry[]>([]);
   const [dcas, setDcas] = useState<DCAEntry[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!address) return;
-    api.getSchedules(address).then(v => setVaults(v)).catch(() => {});
-    api.getStreams(address).then(v => setStreams(v)).catch(() => {});
-    api.getDCA(address).then(v => setDcas(v)).catch(() => {});
+    setLoading(true);
+    Promise.all([
+      api.getSchedules(address).catch(() => []),
+      api.getStreams(address).catch(() => []),
+      api.getDCA(address).catch(() => []),
+    ])
+      .then(([v, s, d]) => {
+        setVaults(v);
+        setStreams(s);
+        setDcas(d);
+      })
+      .finally(() => setLoading(false));
   }, [address]);
 
   if (!isConnected) {
@@ -29,6 +40,10 @@ export default function DashboardPage() {
         <p className="mt-2 text-text-muted">Connect Freighter to view your schedules.</p>
       </div>
     );
+  }
+
+  if (loading) {
+    return <DashboardSkeleton />;
   }
 
   const tabs: { key: Tab; label: string; count: number; newLink: string }[] = [
