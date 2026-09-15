@@ -106,6 +106,8 @@ The keeper can be deployed on Render as a Background Worker using `keeper/render
 
 Base URL: `https://chronostar-backend-s905.onrender.com`
 
+A machine-readable OpenAPI 3.0.3 specification is available at [`backend/openapi.yaml`](./backend/openapi.yaml).
+
 | Endpoint | Description |
 |----------|-------------|
 | `GET /healthz` | Health check |
