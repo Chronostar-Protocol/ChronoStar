@@ -42,6 +42,10 @@ function normalizeNative(value) {
     return Number(value);
   }
   if (Array.isArray(value)) {
+    if (value.length === 1 && typeof value[0] === 'string') {
+      const ordinal = STATUS_ORDINALS[value[0]];
+      if (ordinal !== undefined) return ordinal;
+    }
     return value.map(normalizeNative);
   }
   if (value && typeof value === 'object') {
@@ -51,3 +55,11 @@ function normalizeNative(value) {
   }
   return value;
 }
+
+const STATUS_ORDINALS = {
+  Active: 0,
+  Released: 1,
+  Completed: 1,
+  Exhausted: 1,
+  Cancelled: 2,
+};
