@@ -25,3 +25,19 @@ jobs:
       - run: cargo install cargo-audit
       - run: cargo audit
         working-directory: contract
+
+  npm-audit:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        workspace: [keeper, backend, docs]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ${{ matrix.workspace }}/package-lock.json
+      - run: npm audit
+        working-directory: ${{ matrix.workspace }}
