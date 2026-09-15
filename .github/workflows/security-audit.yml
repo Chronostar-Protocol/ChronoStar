@@ -1,0 +1,15 @@
+name: Security Audit
+
+on:
+  schedule:
+    - cron: '0 4 * * 1'
+  pull_request:
+    paths:
+      - 'contract/Cargo.lock'
+      - 'contract/Cargo.toml'
+      - 'keeper/package.json'
+      - 'keeper/package-lock.json'
+      - 'backend/package.json'
+      - 'backend/package-lock.json'
+      - 'docs/package.json'
+      - 'docs/package-lock.json'
