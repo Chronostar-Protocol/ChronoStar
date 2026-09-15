@@ -1,18 +1,54 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { api } from '@/lib/api';
 import { ExplorerSkeleton } from '@/components/Skeleton';
 import type { ScheduleEvent } from '@/types';
 
+function ErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div className="text-center py-16">
+      <div className="text-4xl mb-3" aria-hidden="true">&#9888;</div>
+      <h2 className="text-lg font-heading font-bold text-text-primary mb-2">
+        Something went wrong
+      </h2>
+      <p className="text-text-muted text-sm mb-6">{message}</p>
+      <button
+        onClick={onRetry}
+        className="px-4 py-2 rounded-lg bg-accent-blue text-white text-sm font-medium hover:opacity-90 transition-opacity"
+      >
+        Try again
+      </button>
+    </div>
+  );
+}
+
 export default function ExplorerPage() {
   const [events, setEvents] = useState<ScheduleEvent[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchEvents = useCallback(() => {
+    setLoading(true);
+    setError(null);
+    api.getEvents(100)
+      .then(setEvents)
+      .catch(() => setError('Failed to load events. Please check your connection and try again.'))
+      .finally(() => setLoading(false));
+  }, []);
 
   useEffect(() => {
-    api.getEvents(100).then(setEvents).catch(() => {}).finally(() => setLoading(false));
-  }, []);
+    fetchEvents();
+  }, [fetchEvents]);
+
+  if (loading) {
+    return <p className="text-text-muted text-center py-12">Loading...</p>;
+  }
+
+  if (error) {
+    return <ErrorState message={error} onRetry={fetchEvents} />;
+  }
 
   if (loading) {
     return <ExplorerSkeleton />;

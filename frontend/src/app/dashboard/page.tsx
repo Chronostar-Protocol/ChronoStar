@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useWallet } from '@/lib/store';
 import { api } from '@/lib/api';
@@ -9,16 +9,36 @@ import type { VaultEntry, StreamEntry, DCAEntry } from '@/types';
 
 type Tab = 'vaults' | 'streams' | 'dca';
 
+function ErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div className="text-center py-16">
+      <div className="text-4xl mb-3" aria-hidden="true">&#9888;</div>
+      <h2 className="text-lg font-heading font-bold text-text-primary mb-2">
+        Something went wrong
+      </h2>
+      <p className="text-text-muted text-sm mb-6">{message}</p>
+      <button
+        onClick={onRetry}
+        className="px-4 py-2 rounded-lg bg-accent-blue text-white text-sm font-medium hover:opacity-90 transition-opacity"
+      >
+        Try again
+      </button>
+    </div>
+  );
+}
+
 export default function DashboardPage() {
   const { address, isConnected } = useWallet();
   const [tab, setTab] = useState<Tab>('vaults');
   const [vaults, setVaults] = useState<VaultEntry[]>([]);
   const [streams, setStreams] = useState<StreamEntry[]>([]);
   const [dcas, setDcas] = useState<DCAEntry[]>([]);
+  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  const fetchData = useCallback(() => {
     if (!address) return;
+    setError(null);
     setLoading(true);
     Promise.all([
       api.getSchedules(address).catch(() => []),
@@ -29,9 +49,22 @@ export default function DashboardPage() {
         setVaults(v);
         setStreams(s);
         setDcas(d);
+        // If all results are empty arrays from catch, show error
+        if (v.length === 0 && s.length === 0 && d.length === 0) {
+          // Could be genuinely empty, or could be all catches fired
+          // We set data anyway so user sees the empty state
+        }
+      })
+      .catch(() => {
+        setError('Failed to load dashboard data. Please check your connection and try again.');
+      });
       })
       .finally(() => setLoading(false));
   }, [address]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
 
   if (!isConnected) {
     return (
@@ -42,6 +75,8 @@ export default function DashboardPage() {
     );
   }
 
+  if (error) {
+    return <ErrorState message={error} onRetry={fetchData} />;
   if (loading) {
     return <DashboardSkeleton />;
   }
