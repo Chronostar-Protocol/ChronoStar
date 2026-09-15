@@ -1,9 +1,10 @@
 import { Router } from 'express';
+import { eventsLimiter } from '../middleware.js';
 
 export function createEventsRouter(clients) {
   const router = Router();
 
-  router.get('/', async (req, res, next) => {
+  router.get('/', eventsLimiter, async (req, res, next) => {
     try {
       const events = [];
 

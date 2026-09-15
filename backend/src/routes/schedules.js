@@ -1,9 +1,10 @@
 import { Router } from 'express';
+import { validateStellarAddress, addressRouteLimiter } from '../middleware.js';
 
 export function createSchedulesRouter(client, contractId) {
   const router = Router();
 
-  router.get('/:address', async (req, res, next) => {
+  router.get('/:address', addressRouteLimiter, validateStellarAddress, async (req, res, next) => {
     try {
       const address = req.params.address;
       const vaultIds = await client.readContract(

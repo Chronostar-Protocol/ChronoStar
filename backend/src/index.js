@@ -4,6 +4,7 @@ import pinoHttp from 'pino-http';
 import { config } from './config.js';
 import { logger } from './logger.js';
 import { SorobanClient } from './soroban-client.js';
+import { globalLimiter } from './middleware.js';
 import { createSchedulesRouter } from './routes/schedules.js';
 import { createStreamsRouter, createDCARouter } from './routes/streams.js';
 import { createEventsRouter } from './routes/events.js';
@@ -22,6 +23,7 @@ const app = express();
 app.use(cors());
 app.use(pinoHttp({ logger }));
 app.use(express.json());
+app.use(globalLimiter);
 
 app.use('/api/schedules', createSchedulesRouter(client, config.vaultContractId));
 app.use('/api/streams', createStreamsRouter(client, config.streamContractId));
