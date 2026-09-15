@@ -4,7 +4,8 @@ import { logger } from './logger.js';
 
 export class SorobanClient {
   constructor() {
-    this.server = new rpc.Server(config.rpcUrl);
+    const isInsecureHttp = config.rpcUrl.startsWith('http://');
+    this.server = new rpc.Server(config.rpcUrl, { allowHttp: isInsecureHttp });
     this.networkPassphrase = config.networkPassphrase;
   }
 
