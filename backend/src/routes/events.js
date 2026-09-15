@@ -1,10 +1,14 @@
 import { Router } from 'express';
 import { eventsLimiter } from '../middleware.js';
 
-export function createEventsRouter(clients) {
+export function createEventsRouter(clients, logger) {
   const router = Router();
 
   router.get('/', eventsLimiter, async (req, res, next) => {
+    const correlationId = req.id;
+    if (logger) {
+      logger.info({ correlationId }, 'events request received');
+    }
     try {
       const events = [];
 
