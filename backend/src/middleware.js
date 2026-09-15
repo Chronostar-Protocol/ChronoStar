@@ -1,6 +1,16 @@
+import crypto from 'node:crypto';
 import rateLimit from 'express-rate-limit';
 
 const STELLAR_PUBLIC_KEY_RE = /^G[A-Z0-9]{55}$/;
+
+export function genReqId(req, res) {
+  const correlationId = req.headers['x-correlation-id'];
+  const id = typeof correlationId === 'string' && correlationId
+    ? correlationId
+    : crypto.randomUUID();
+  res.setHeader('X-Correlation-ID', id);
+  return id;
+}
 
 export function validateStellarAddress(req, res, next) {
   const { address } = req.params;
