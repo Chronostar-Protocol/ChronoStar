@@ -1,14 +1,15 @@
-import { logger } from '../logger.js';
+import { logger, generateCorrelationId } from '../logger.js';
 
 export class VaultWatcher {
-  constructor(sorobanClient, contractId) {
+  constructor(sorobanClient, contractId, parentLogger = logger) {
     this.client = sorobanClient;
     this.contractId = contractId;
     this.interval = null;
+    this.logger = parentLogger;
   }
 
   start(pollIntervalMs) {
-    logger.info({ contractId: this.contractId }, 'VaultWatcher started');
+    this.logger.info({ contractId: this.contractId }, 'VaultWatcher started');
     this.poll();
     this.interval = setInterval(() => this.poll(), pollIntervalMs);
   }
@@ -21,6 +22,9 @@ export class VaultWatcher {
   }
 
   async poll() {
+    const correlationId = generateCorrelationId();
+    const cycleLogger = this.logger.child({ correlationId });
+    cycleLogger.info('VaultWatcher poll cycle started');
     try {
       const currentLedger = await this.client.readContract(
         this.contractId,
@@ -48,14 +52,14 @@ export class VaultWatcher {
         const releaseLedger = Number(vault._attributes.release_ledger);
         const currentSeq = Number(currentLedger);
         if (currentSeq >= releaseLedger) {
-          logger.info({ vaultId: i }, 'releasing vault');
+          cycleLogger.info({ vaultId: i }, 'releasing vault');
           await this.client.invokeContract(this.contractId, 'release', [
             new (await import('@stellar/stellar-sdk')).xdr.ScVal.scvU64(i),
           ]);
         }
       }
     } catch (err) {
-      logger.error({ err: err.message }, 'VaultWatcher poll error');
+      cycleLogger.error({ err: err.message }, 'VaultWatcher poll error');
     }
   }
 }
