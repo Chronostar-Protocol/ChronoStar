@@ -1,14 +1,15 @@
-import { logger } from '../logger.js';
+import { logger, generateCorrelationId } from '../logger.js';
 
 export class DCAWatcher {
-  constructor(sorobanClient, contractId) {
+  constructor(sorobanClient, contractId, parentLogger = logger) {
     this.client = sorobanClient;
     this.contractId = contractId;
     this.interval = null;
+    this.logger = parentLogger;
   }
 
   start(pollIntervalMs) {
-    logger.info({ contractId: this.contractId }, 'DCAWatcher started');
+    this.logger.info({ contractId: this.contractId }, 'DCAWatcher started');
     this.poll();
     this.interval = setInterval(() => this.poll(), pollIntervalMs);
   }
@@ -21,6 +22,9 @@ export class DCAWatcher {
   }
 
   async poll() {
+    const correlationId = generateCorrelationId();
+    const cycleLogger = this.logger.child({ correlationId });
+    cycleLogger.info('DCAWatcher poll cycle started');
     try {
       const dcaCount = await this.client.readContract(
         this.contractId,
@@ -42,14 +46,14 @@ export class DCAWatcher {
         const nextExec = Number(dca._attributes.next_execution_ledger);
 
         if (currentSeq >= nextExec) {
-          logger.info({ dcaId: i }, 'executing DCA swap');
+          cycleLogger.info({ dcaId: i }, 'executing DCA swap');
           await this.client.invokeContract(this.contractId, 'execute_swap', [
             new (await import('@stellar/stellar-sdk')).xdr.ScVal.scvU64(i),
           ]);
         }
       }
     } catch (err) {
-      logger.error({ err: err.message }, 'DCAWatcher poll error');
+      cycleLogger.error({ err: err.message }, 'DCAWatcher poll error');
     }
   }
 }
