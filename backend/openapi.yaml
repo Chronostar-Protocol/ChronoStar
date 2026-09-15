@@ -1,0 +1,563 @@
+openapi: 3.0.3
+info:
+  title: ChronoStar Backend API
+  description: >
+    REST API for reading on-chain state from the ChronoStar protocol —
+    time-based payment primitives (scheduled vaults, recurring streams,
+    and DCA policies) on the Stellar network.
+  version: 1.0.0
+  contact:
+    name: ChronoStar Protocol
+    url: https://github.com/Chronostar-Protocol/ChronoStar
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: https://chronostar-backend-s905.onrender.com
+    description: Production (Render)
+  - url: http://localhost:3001
+    description: Local development
+
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      summary: Health check
+      description: Returns the health status of the backend service.
+      tags:
+        - System
+      responses:
+        "200":
+          description: Service is healthy.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /api/stats:
+    get:
+      operationId: getStats
+      summary: Aggregated statistics
+      description: >
+        Returns aggregate statistics across all three contracts — vaults,
+        streams, and DCA policies — including total, active, and
+        terminal-state counts.
+      tags:
+        - Stats
+      responses:
+        "200":
+          description: Aggregated stats across all contracts.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatsResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/events:
+    get:
+      operationId: getEvents
+      summary: Upcoming executable events
+      description: >
+        Returns a sorted list of on-chain items (vaults, streams, DCA)
+        that are pending execution, ordered by the number of ledgers
+        remaining until their target ledger.
+      tags:
+        - Events
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: >
+            Maximum number of events to return. Clamped to 100.
+            Defaults to 50.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+          example: 10
+      responses:
+        "200":
+          description: List of upcoming events, sorted by remaining ledgers ascending.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Event"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/schedules/{address}:
+    get:
+      operationId: getSchedules
+      summary: Vaults for a Stellar address
+      description: >
+        Returns all schedule-vault entries owned by the given Stellar
+        public key. Each vault represents a time-locked token transfer.
+      tags:
+        - Schedules
+      parameters:
+        - $ref: "#/components/parameters/StellarAddress"
+      responses:
+        "200":
+          description: List of vaults owned by the address.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Vault"
+        "400":
+          $ref: "#/components/responses/BadAddress"
+        "429":
+          $ref: "#/components/responses/RateLimitedAddress"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/streams/{address}:
+    get:
+      operationId: getStreams
+      summary: Streams for a Stellar address
+      description: >
+        Returns all recurring-stream entries where the address is either
+        the owner or the recipient.
+      tags:
+        - Streams
+      parameters:
+        - $ref: "#/components/parameters/StellarAddress"
+      responses:
+        "200":
+          description: List of streams for the address.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Stream"
+        "400":
+          $ref: "#/components/responses/BadAddress"
+        "429":
+          $ref: "#/components/responses/RateLimitedAddress"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/dca/{address}:
+    get:
+      operationId: getDCA
+      summary: DCA policies for a Stellar address
+      description: >
+        Returns all dollar-cost-averaging policies owned by the given
+        Stellar public key.
+      tags:
+        - DCA
+      parameters:
+        - $ref: "#/components/parameters/StellarAddress"
+      responses:
+        "200":
+          description: List of DCA policies for the address.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DCA"
+        "400":
+          $ref: "#/components/responses/BadAddress"
+        "429":
+          $ref: "#/components/responses/RateLimitedAddress"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+components:
+  parameters:
+    StellarAddress:
+      name: address
+      in: path
+      required: true
+      description: >
+        Stellar public key (G-starting, 56 characters).
+      schema:
+        type: string
+        pattern: "^G[A-Z0-9]{55}$"
+        minLength: 56
+        maxLength: 56
+      example: GBXGQJYF4VCR6J7QCRDMYNCHTSONGZXYQHG7OFNZFLZJGXA7ZUGA7AJE
+
+  schemas:
+    HealthResponse:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          example: ok
+
+    StatsResponse:
+      type: object
+      required:
+        - vaults
+        - streams
+        - dca
+        - totalValueLocked
+      properties:
+        vaults:
+          $ref: "#/components/schemas/VaultStats"
+        streams:
+          $ref: "#/components/schemas/StreamStats"
+        dca:
+          $ref: "#/components/schemas/DCAStats"
+        totalValueLocked:
+          type: string
+          description: Total value locked across all contracts (currently always "0").
+          example: "0"
+
+    VaultStats:
+      type: object
+      required:
+        - total
+        - active
+        - released
+      properties:
+        total:
+          type: integer
+          example: 10
+        active:
+          type: integer
+          example: 8
+        released:
+          type: integer
+          example: 2
+
+    StreamStats:
+      type: object
+      required:
+        - total
+        - active
+        - completed
+      properties:
+        total:
+          type: integer
+          example: 5
+        active:
+          type: integer
+          example: 4
+        completed:
+          type: integer
+          example: 1
+
+    DCAStats:
+      type: object
+      required:
+        - total
+        - active
+        - exhausted
+      properties:
+        total:
+          type: integer
+          example: 3
+        active:
+          type: integer
+          example: 2
+        exhausted:
+          type: integer
+          example: 1
+
+    Event:
+      type: object
+      required:
+        - type
+        - id
+        - targetLedger
+        - remainingLedgers
+      properties:
+        type:
+          type: string
+          description: Contract type that owns the event.
+          enum:
+            - vault
+            - stream
+            - dca
+        id:
+          type: integer
+          format: uint64
+          description: On-chain entity identifier.
+          example: 1
+        targetLedger:
+          type: integer
+          format: uint32
+          description: Ledger sequence at which the event becomes executable.
+          example: 2000000
+        remainingLedgers:
+          type: integer
+          description: >
+            Number of ledgers until the target ledger is reached.
+            Can be negative if the target has already passed.
+          example: 5000
+
+    Vault:
+      type: object
+      required:
+        - id
+        - owner
+        - recipient
+        - token
+        - amount
+        - release_ledger
+        - created_ledger
+        - label
+        - status
+      properties:
+        id:
+          type: integer
+          format: uint64
+          description: On-chain vault identifier.
+          example: 1
+        owner:
+          type: string
+          description: Stellar public key of the vault creator.
+          example: GBXGQJYF4VCR6J7QCRDMYNCHTSONGZXYQHG7OFNZFLZJGXA7ZUGA7AJE
+        recipient:
+          type: string
+          description: Stellar public key that receives tokens on release.
+          example: GDEFMRO2R4RJ4W7DJS7S5A5KD6YIYAUZ3QJYF7EF4YXQ3DPALZ6K56VP
+        token:
+          type: string
+          description: Contract address of the wrapped token held in the vault.
+          example: CCFOFLN72BDT7FCD5IWHYFVMI5JN76JZKB4RZ42HVK2W5V44Z5OLH3Q
+        amount:
+          type: string
+          description: Amount of tokens locked (decimal string).
+          example: "1000000"
+        release_ledger:
+          type: integer
+          format: uint32
+          description: Ledger sequence after which the vault can be released.
+          example: 2000000
+        created_ledger:
+          type: integer
+          format: uint32
+          description: Ledger sequence when the vault was created.
+          example: 1500000
+        label:
+          type: string
+          description: Human-readable label (max 64 characters).
+          example: "Q1 bonus payout"
+        status:
+          type: string
+          description: Current vault status.
+          enum:
+            - Active
+            - Released
+            - Cancelled
+
+    Stream:
+      type: object
+      required:
+        - id
+        - owner
+        - recipient
+        - token
+        - total_amount
+        - claimed_amount
+        - start_ledger
+        - end_ledger
+        - last_claimed_ledger
+        - created_ledger
+        - label
+        - status
+      properties:
+        id:
+          type: integer
+          format: uint64
+          description: On-chain stream identifier.
+          example: 1
+        owner:
+          type: string
+          description: Stellar public key of the stream creator.
+          example: GBXGQJYF4VCR6J7QCRDMYNCHTSONGZXYQHG7OFNZFLZJGXA7ZUGA7AJE
+        recipient:
+          type: string
+          description: Stellar public key that receives streamed tokens.
+          example: GDEFMRO2R4RJ4W7DJS7S5A5KD6YIYAUZ3QJYF7EF4YXQ3DPALZ6K56VP
+        token:
+          type: string
+          description: Contract address of the streamed token.
+          example: CCFOFLN72BDT7FCD5IWHYFVMI5JN76JZKB4RZ42HVK2W5V44Z5OLH3Q
+        total_amount:
+          type: string
+          description: Total number of tokens to be streamed (decimal string).
+          example: "5000"
+        claimed_amount:
+          type: string
+          description: Amount of tokens already claimed by the recipient.
+          example: "1500"
+        start_ledger:
+          type: integer
+          format: uint32
+          description: Ledger sequence when streaming begins.
+          example: 1500000
+        end_ledger:
+          type: integer
+          format: uint32
+          description: Ledger sequence when streaming ends.
+          example: 1501440
+        last_claimed_ledger:
+          type: integer
+          format: uint32
+          description: Ledger sequence of the most recent claim.
+          example: 1500600
+        created_ledger:
+          type: integer
+          format: uint32
+          description: Ledger sequence when the stream was created.
+          example: 1500000
+        label:
+          type: string
+          description: Human-readable label (max 64 characters).
+          example: "Monthly salary stream"
+        status:
+          type: string
+          description: Current stream status.
+          enum:
+            - Active
+            - Completed
+            - Cancelled
+
+    DCA:
+      type: object
+      required:
+        - id
+        - owner
+        - token_in
+        - swap_receiver
+        - total_budget
+        - remaining_budget
+        - amount_per_swap
+        - interval_ledgers
+        - last_executed_ledger
+        - next_execution_ledger
+        - executions_completed
+        - created_ledger
+        - label
+        - status
+      properties:
+        id:
+          type: integer
+          format: uint64
+          description: On-chain DCA policy identifier.
+          example: 1
+        owner:
+          type: string
+          description: Stellar public key of the DCA policy creator.
+          example: GBXGQJYF4VCR6J7QCRDMYNCHTSONGZXYQHG7OFNZFLZJGXA7ZUGA7AJE
+        token_in:
+          type: string
+          description: Contract address of the token used for swaps.
+          example: CCFOFLN72BDT7FCD5IWHYFVMI5JN76JZKB4RZ42HVK2W5V44Z5OLH3Q
+        swap_receiver:
+          type: string
+          description: Stellar public key that receives each swap payout.
+          example: GDEFMRO2R4RJ4W7DJS7S5A5KD6YIYAUZ3QJYF7EF4YXQ3DPALZ6K56VP
+        total_budget:
+          type: string
+          description: Total token budget for all swaps (decimal string).
+          example: "1000000"
+        remaining_budget:
+          type: string
+          description: Remaining budget after completed swaps.
+          example: "700000"
+        amount_per_swap:
+          type: string
+          description: Amount transferred per swap execution.
+          example: "100000"
+        interval_ledgers:
+          type: integer
+          format: uint32
+          description: Minimum number of ledgers between swap executions.
+          example: 1440
+        last_executed_ledger:
+          type: integer
+          format: uint32
+          description: Ledger sequence of the most recent swap execution.
+          example: 1501440
+        next_execution_ledger:
+          type: integer
+          format: uint32
+          description: Earliest ledger at which the next swap can execute.
+          example: 1502880
+        executions_completed:
+          type: integer
+          format: uint32
+          description: Number of swaps executed so far.
+          example: 3
+        created_ledger:
+          type: integer
+          format: uint32
+          description: Ledger sequence when the DCA policy was created.
+          example: 1500000
+        label:
+          type: string
+          description: Human-readable label (max 64 characters).
+          example: "Weekly ETH DCA"
+        status:
+          type: string
+          description: Current DCA policy status.
+          enum:
+            - Active
+            - Exhausted
+            - Cancelled
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          description: Human-readable error message.
+          example: "Invalid Stellar address. Must be a G-starting 56-character public key."
+
+  responses:
+    BadAddress:
+      description: Invalid Stellar address format.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: "Invalid Stellar address. Must be a G-starting 56-character public key."
+
+    RateLimited:
+      description: Global rate limit exceeded.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: "Too many requests, please try again later."
+
+    RateLimitedAddress:
+      description: Per-address rate limit exceeded.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: "Too many requests for this address, please try again later."
+
+    InternalError:
+      description: Internal server error.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: "internal server error"
