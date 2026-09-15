@@ -4,12 +4,20 @@ import express from 'express';
 import request from 'supertest';
 import { createSchedulesRouter } from './schedules.js';
 
+const VALID_ADDRESS = 'GBXGQJYF4VCR6J7QCRDMYNCHTSONGZXYQHG7OFNZFLZJGXA7ZUGA7AJE';
+
 function mockClient() {
   return {
     readContract: mock.fn(),
     scvU64: (v) => v,
     scvAddress: (a) => a,
   };
+}
+
+function appWithRouter(client) {
+  const app = express();
+  app.use('/api/schedules', createSchedulesRouter(client, 'C...'));
+  return app;
 }
 
 describe('GET /api/schedules/:address', () => {
@@ -26,10 +34,7 @@ describe('GET /api/schedules/:address', () => {
       return null;
     });
 
-    const app = express();
-    app.use('/api/schedules', createSchedulesRouter(client, 'C...'));
-
-    const res = await request(app).get('/api/schedules/G...');
+    const res = await request(appWithRouter(client)).get(`/api/schedules/${VALID_ADDRESS}`);
     assert.strictEqual(res.status, 200);
     assert.strictEqual(res.body.length, 2);
     assert.strictEqual(res.body[0].amount, 1000);
@@ -39,11 +44,15 @@ describe('GET /api/schedules/:address', () => {
     const client = mockClient();
     client.readContract.mock.mockImplementation(() => null);
 
-    const app = express();
-    app.use('/api/schedules', createSchedulesRouter(client, 'C...'));
-
-    const res = await request(app).get('/api/schedules/G...');
+    const res = await request(appWithRouter(client)).get(`/api/schedules/${VALID_ADDRESS}`);
     assert.strictEqual(res.status, 200);
     assert.deepStrictEqual(res.body, []);
+  });
+
+  it('rejects invalid address format', async () => {
+    const client = mockClient();
+    const res = await request(appWithRouter(client)).get('/api/schedules/not-a-valid-key');
+    assert.strictEqual(res.status, 400);
+    assert.match(res.body.error, /Invalid Stellar address/);
   });
 });

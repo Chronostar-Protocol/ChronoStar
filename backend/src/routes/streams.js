@@ -1,9 +1,10 @@
 import { Router } from 'express';
+import { validateStellarAddress, addressRouteLimiter } from '../middleware.js';
 
 export function createStreamsRouter(client, contractId) {
   const router = Router();
 
-  router.get('/:address', async (req, res, next) => {
+  router.get('/:address', addressRouteLimiter, validateStellarAddress, async (req, res, next) => {
     try {
       const address = req.params.address;
       const [asOwner, asRecipient] = await Promise.all([
@@ -27,7 +28,7 @@ export function createStreamsRouter(client, contractId) {
 export function createDCARouter(client, contractId) {
   const router = Router();
 
-  router.get('/:address', async (req, res, next) => {
+  router.get('/:address', addressRouteLimiter, validateStellarAddress, async (req, res, next) => {
     try {
       const address = req.params.address;
       const dcaIds = await client.readContract(contractId, 'get_dcas_by_owner', [client.scvAddress(address)]);
