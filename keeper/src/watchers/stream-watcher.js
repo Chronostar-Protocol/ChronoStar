@@ -1,14 +1,15 @@
-import { logger } from '../logger.js';
+import { logger, generateCorrelationId } from '../logger.js';
 
 export class StreamWatcher {
-  constructor(sorobanClient, contractId) {
+  constructor(sorobanClient, contractId, parentLogger = logger) {
     this.client = sorobanClient;
     this.contractId = contractId;
     this.interval = null;
+    this.logger = parentLogger;
   }
 
   start(pollIntervalMs) {
-    logger.info({ contractId: this.contractId }, 'StreamWatcher started');
+    this.logger.info({ contractId: this.contractId }, 'StreamWatcher started');
     this.poll();
     this.interval = setInterval(() => this.poll(), pollIntervalMs);
   }
@@ -21,6 +22,9 @@ export class StreamWatcher {
   }
 
   async poll() {
+    const correlationId = generateCorrelationId();
+    const cycleLogger = this.logger.child({ correlationId });
+    cycleLogger.info('StreamWatcher poll cycle started');
     try {
       const streamCount = await this.client.readContract(
         this.contractId,
@@ -42,14 +46,14 @@ export class StreamWatcher {
         const endLedger = Number(stream._attributes.end_ledger);
 
         if (currentSeq >= endLedger) {
-          logger.info({ streamId: i }, 'ticking completed stream');
+          cycleLogger.info({ streamId: i }, 'ticking completed stream');
           await this.client.invokeContract(this.contractId, 'tick', [
             new (await import('@stellar/stellar-sdk')).xdr.ScVal.scvU64(i),
           ]);
         }
       }
     } catch (err) {
-      logger.error({ err: err.message }, 'StreamWatcher poll error');
+      cycleLogger.error({ err: err.message }, 'StreamWatcher poll error');
     }
   }
 }
