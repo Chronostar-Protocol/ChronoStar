@@ -28,11 +28,26 @@ export class SorobanClient {
   async readContract(contractId, method, args) {
     const sim = await this.simulate(contractId, method, args);
     if (!sim?.result?.retval) return null;
-    return scValToNative(sim.result.retval);
+    return normalizeNative(scValToNative(sim.result.retval));
   }
 
   scvU64(val) { return xdr.ScVal.scvU64(BigInt(val)); }
   scvAddress(addr) {
     return Address.fromString(addr).toScVal();
   }
+}
+
+function normalizeNative(value) {
+  if (typeof value === 'bigint') {
+    return Number(value);
+  }
+  if (Array.isArray(value)) {
+    return value.map(normalizeNative);
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, val]) => [key, normalizeNative(val)]),
+    );
+  }
+  return value;
 }
