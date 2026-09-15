@@ -13,3 +13,15 @@ on:
       - 'backend/package-lock.json'
       - 'docs/package.json'
       - 'docs/package-lock.json'
+
+jobs:
+  cargo-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          target: wasm32-unknown-unknown
+      - run: cargo install cargo-audit
+      - run: cargo audit
+        working-directory: contract
