@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useWallet } from '@/lib/store';
 import { api } from '@/lib/api';
+import { DashboardSkeleton } from '@/components/Skeleton';
 import type { VaultEntry, StreamEntry, DCAEntry } from '@/types';
 
 type Tab = 'vaults' | 'streams' | 'dca';
@@ -33,10 +34,12 @@ export default function DashboardPage() {
   const [streams, setStreams] = useState<StreamEntry[]>([]);
   const [dcas, setDcas] = useState<DCAEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   const fetchData = useCallback(() => {
     if (!address) return;
     setError(null);
+    setLoading(true);
     Promise.all([
       api.getSchedules(address).catch(() => []),
       api.getStreams(address).catch(() => []),
@@ -55,6 +58,8 @@ export default function DashboardPage() {
       .catch(() => {
         setError('Failed to load dashboard data. Please check your connection and try again.');
       });
+      })
+      .finally(() => setLoading(false));
   }, [address]);
 
   useEffect(() => {
@@ -72,6 +77,8 @@ export default function DashboardPage() {
 
   if (error) {
     return <ErrorState message={error} onRetry={fetchData} />;
+  if (loading) {
+    return <DashboardSkeleton />;
   }
 
   const tabs: { key: Tab; label: string; count: number; newLink: string }[] = [

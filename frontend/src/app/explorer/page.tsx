@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { api } from '@/lib/api';
+import { ExplorerSkeleton } from '@/components/Skeleton';
 import type { ScheduleEvent } from '@/types';
 
 function ErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {
@@ -47,6 +48,10 @@ export default function ExplorerPage() {
 
   if (error) {
     return <ErrorState message={error} onRetry={fetchEvents} />;
+  }
+
+  if (loading) {
+    return <ExplorerSkeleton />;
   }
 
   return (

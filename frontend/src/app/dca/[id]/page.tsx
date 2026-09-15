@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { api } from '@/lib/api';
 import { useWallet } from '@/lib/store';
 import { TxToast } from '@/components/TxToast';
+import { DetailPageSkeleton } from '@/components/Skeleton';
 import type { DCAEntry } from '@/types';
 
 export default function DCADetailPage() {
@@ -58,6 +59,23 @@ export default function DCADetailPage() {
             &larr; Dashboard
           </Link>
         </div>
+    api.getDCA(address).then(dcas => {
+      const found = dcas.find(d => d.id === Number(id));
+      if (found) setDca(found);
+    }).finally(() => setLoading(false));
+  }, [address, id]);
+
+  if (loading) {
+    return <DetailPageSkeleton />;
+  }
+
+  if (!dca) {
+    return (
+      <div className="text-center py-20">
+        <p className="text-text-muted">DCA policy not found.</p>
+        <Link href="/dashboard" className="text-sm text-accent-blue hover:underline mt-2 inline-block">
+          &larr; Back to Dashboard
+        </Link>
       </div>
     );
   }

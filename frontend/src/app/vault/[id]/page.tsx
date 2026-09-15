@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { api } from '@/lib/api';
 import { useWallet } from '@/lib/store';
 import { TxToast } from '@/components/TxToast';
+import { DetailPageSkeleton } from '@/components/Skeleton';
 import type { VaultEntry } from '@/types';
 
 export default function VaultDetailPage() {
@@ -36,6 +37,25 @@ export default function VaultDetailPage() {
 
   if (loading) {
     return <p className="text-text-muted text-center py-20">Loading...</p>;
+    api.getSchedules(address).then(vaults => {
+      const found = vaults.find(v => v.id === Number(id));
+      if (found) setVault(found);
+    }).finally(() => setLoading(false));
+  }, [address, id]);
+
+  if (loading) {
+    return <DetailPageSkeleton />;
+  }
+
+  if (!vault) {
+    return (
+      <div className="text-center py-20">
+        <p className="text-text-muted">Vault not found.</p>
+        <Link href="/dashboard" className="text-sm text-accent-blue hover:underline mt-2 inline-block">
+          &larr; Back to Dashboard
+        </Link>
+      </div>
+    );
   }
 
   if (error) {
