@@ -68,6 +68,17 @@ paths:
       tags:
         - Events
       parameters:
+        - name: X-Correlation-ID
+          in: header
+          required: false
+          description: >
+            Optional correlation identifier (e.g. a keeper poll-cycle ID).
+            When supplied, it is used as the server-side request ID, logged
+            by the backend, and echoed back in the response header.
+          schema:
+            type: string
+            format: uuid
+          example: 9f1c2f7a-3c2e-4b1a-9d0e-5f6a7b8c9d0e
         - name: limit
           in: query
           required: false
@@ -83,6 +94,11 @@ paths:
       responses:
         "200":
           description: List of upcoming events, sorted by remaining ledgers ascending.
+          headers:
+            X-Correlation-ID:
+              description: Echo of the correlation ID used for this request.
+              schema:
+                type: string
           content:
             application/json:
               schema:
