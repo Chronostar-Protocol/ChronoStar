@@ -479,3 +479,84 @@ refund — a pure user-initiated migration and out of v1 scope.
 
 This keeps `Config` per-network correct without code changes (see
 [Admin / configuration functions](/contracts/dca-multi-asset/#admin--configuration-functions)).
+
+## Security Considerations
+
+1. **Router authorization:** AMM routers call `require_auth()` on the output recipient. The
+   policy must authenticate itself (using `env.current_contract_address()`) and forward
+   `token_out` afterward. Never route output directly to a user-chosen address in v1 unless
+   the user explicitly signed the policy creation; this prevents a malicious
+   `swap_receiver` from front-running or re-directing fills.
+2. **Path validation:** `path[0]`/`path[-1]` enforcement at creation is a hard invariant.
+   A permissive path lets a user or exploit pre-fill a pool and drain budget into an asset the
+   keeper then mishandles — the invariant closes that.
+3. **Slippage floor:** `min_amount_out_bps > 0` enforced at creation. A zero floor turns
+   `execute_swap` into a sandbag for MEV: a keeper can sandwich a fill with no downside.
+4. **Deadline:** `deadline_u64` is `current_ledger + deadline_offset_ledgers`, so a fill that
+   sits pending across many ledgers cannot be executed at a stale price. Retry-on-fail plus
+   deadline protects against both stale pricing and keeper downtime.
+5. **Fee draining via retries:** because fees are absorbed by the fill and revert-on-slippage
+   leaves budget untouched, a cheap-keeping attack cannot slowly drain `remaining_budget`.
+6. **TTL hygiene:** migrated and new entry TTLs must be extended (`extend_ttl`) exactly as in
+   the current `create_dca`/`execute_swap`; the `remove` on the legacy key must also remove the
+   old key's TTL entry.
+7. **DEX upgrade risk:** router/pair contracts are third-party code. Pin
+   `config.dex_address` per network, restrict `set_config` to the admin address, and re-sign
+   `Config` on any venue upgrade (see Soroswap's own security notes on integrating pair
+   contracts).
+
+## Testing Strategy
+
+The existing 5 contract tests (`cargo test -p dca-policy`) stay green and are extended:
+
+| Test | What it verifies |
+|---|---|
+| `test_create_dca_v2` | New signature, path validation, `token_in != token_out`, bps bounds |
+| `test_execute_swap_v2_soroswap` | Soroswap router stub returns `token_out`; budget decremented; realized amount recorded |
+| `test_execute_swap_v2_phoenix` | Phoenix multihop serialization shim (`Swap[]`) behaves identically |
+| `test_execute_swap_slippage_revert` | Sub-`amount_out_min` fill reverts, DCA stays due, budget unchanged |
+| `test_migrate_legacy_on_read` | Touching a `DCA(u64)` entry creates `DCAV2(u64)` and removes v1 key; legacy semantics preserved |
+| `test_legacy_transfer_unaffected` | A `swap_config = None` entry still transfers to `swap_receiver` on `master`-identical path |
+| `test_cancel_v2` | Cancel on v2 returns full remaining `token_in` budget (fees never touch budget) |
+
+Integration:
+
+- Keeper `DCAWatcher` unit tests run against a mocked v2 `get_dca_v2` returning `swap_config`.
+- Backend `createDCARouter` tests map the new fields in the response.
+- Optional local Soroban sandbox: seed Soroswap router + pair (see docs/backend integration
+  harness in `backend/src/routes/streams.test.js` context) and drive a real v2 fill.
+
+## Rollout Plan
+
+1. **Phase 0 – Design freeze:** this document accepted, DEX addresses pinned.
+2. **Phase 1 – Contract v2:** implement `create_dca`/`execute_swap`/migration/`Config`,
+   extend rust tests, run `cargo test` and `stellar contract build`.
+3. **Phase 2 – Off-chain:** keeper v2 read path, backend response mapping, frontend form.
+4. **Phase 3 – Testnet:** deploy alongside existing contract, seed router pools, validate
+   USDC→XLM and XLM→USDC fills, run keeper e2e.
+5. **Phase 4 – Migration soak:** observe legacy policies executing untouched; snapshot
+   `DCA(u64)` churn.
+6. **Phase 5 – Mainnet:** follow `contract/DEPLOY.md` (mainnet) with `set_config` pointed at
+   published routers.
+
+## Open Questions
+
+- **Minimum viable `amount_per_swap`:** what floor keeps a keeper-funded `execute_swap`
+  profitable after DEX fee + `base_fee`? Needs a testnet economy study.
+- **Phoenix `max_belief_price` vs bps:** exact mapping from `min_amount_out_bps` to Phoenix's
+  `max_belief_price`/`max_spread_bps` parameters needs a pool-by-pool check.
+- **Fee-on-transfer tokens:** tokens with transfer fees (rare on Stellar SAC) distort the
+  `remaining_budget −= amount_per_swap` accounting; decide whether to reject at creation.
+- **Should `swap_receiver` be deprecated** for v2 entries in favor of `owner` semantics, or
+  kept as the `token_out` forwarding target?
+- **Aggregator now or later:** fold Soroswap Aggregator into v1 (`DexProvider::Aggregator`)
+  if thin-pair pricing demands it during Phase 3.
+
+## References
+
+- [`contract/dca-policy/src/lib.rs`](https://github.com/Chronostar-Protocol/ChronoStar/blob/master/contract/dca-policy/src/lib.rs)
+- [`contract/DEPLOY.md`](https://github.com/Chronostar-Protocol/ChronoStar/blob/master/contract/DEPLOY.md)
+- [`keeper/src/watchers/dca-watcher.js`](https://github.com/Chronostar-Protocol/ChronoStar/blob/master/keeper/src/watchers/dca-watcher.js)
+- [`backend/src/routes/streams.js`](https://github.com/Chronostar-Protocol/ChronoStar/blob/master/backend/src/routes/streams.js)
+- [Soroswap Router / smart-contract integration](https://docs.soroswap.finance/amm/technical-reference/smart-contract-integration.md)
+- [Phoenix protocol (Multihop)](https://github.com/Phoenix-Protocol-Group/phoenix-contracts)
