@@ -81,3 +81,146 @@ user actually receives the intended asset.
   configured venue per policy; a Soroswap Aggregator option can be layered on later.
 - **Protocol revenue sharing / take-rate fees:** discussed in
   [Fee Handling](/contracts/dca-multi-asset/#fee-handling) as an explicit decision.
+
+## Proposed Contract Changes
+
+### Data model
+
+`DCAEntry` (see `contract/dca-policy/src/lib.rs`) gains two fields and one optional block:
+
+```rust
+pub struct DCAEntry {
+    pub id: u64,
+    pub owner: Address,
+    pub token_in: Address,
+    pub token_out: Address,      // NEW  – destination asset bought by each swap
+    pub swap_receiver: Address,  // kept – for opt-out "forward-only" DCAs (see Migration)
+    pub total_budget: i128,
+    pub remaining_budget: i128,
+    pub amount_per_swap: i128,
+    pub interval_ledgers: u32,
+    pub last_executed_ledger: u32,
+    pub next_execution_ledger: u32,
+    pub executions_completed: u32,
+    pub created_ledger: u32,
+    pub label: String,
+    pub status: DCAStatus,
+    // NEW
+    pub swap_config: Option<SwapConfig>,
+    pub decimals_in: u32,        // cached, avoids repeated token metadata reads
+    pub decimals_out: u32,       // cached, avoids repeated token metadata reads
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub struct SwapConfig {
+    pub dex: DexProvider,         // Soroswap | Phoenix | (future: Aggregator)
+    pub dex_address: Address,     // router / multihop instance
+    pub path: Vec<Address>,       // e.g. [USDC, XLM] or [USDC, XLM, EURC] multi-hop
+    pub min_amount_out_bps: u32,  // slippage guard, in basis points (e.g. 50 = 0.5%)
+    pub deadline_offset_ledgers: u32, // quoted ledger + offset as swap deadline
+}
+```
+
+`DexProvider` is a small enum stored in the entry so the contract knows which router ABI to
+use when executing:
+
+```rust
+#[contracttype]
+#[derive(Clone, PartialEq, Debug)]
+pub enum DexProvider {
+    Soroswap,
+    Phoenix,
+}
+```
+
+### Versioning state
+
+Storage keys are versioned so the migration does not clobber live entries. Replace the raw
+`DataKey::DCA(u64)` with a versioned wrapper keyed on the enum instance:
+
+```rust
+#[contracttype]
+pub enum DataKey {
+    DCA(u64),          // v1 entries – legacy, read-only after migration
+    DCAV2(u64),        // NEW – post-migration entries
+    Counter,
+    DCAsByOwner(Address),
+    Config,            // NEW – global router addresses, admin
+}
+```
+
+### `create_dca` signature
+
+The v2 entry point keeps the existing argument order for source compatibility and appends
+the new swap parameters:
+
+```rust
+pub fn create_dca(
+    env: Env,
+    owner: Address,
+    token_in: Address,
+    token_out: Address,          // NEW
+    swap_receiver: Address,
+    total_budget: i128,
+    amount_per_swap: i128,
+    interval_ledgers: u32,
+    label: String,
+    dex: DexProvider,            // NEW
+    path: Vec<Address>,          // NEW
+    min_amount_out_bps: u32,     // NEW
+) -> u64
+```
+
+New validation rules:
+
+- `token_in != token_out` (no-op swaps rejected).
+- `path[0] == token_in` and `path[path.len()-1] == token_out` — the route must start and end
+  with the funded and target assets.
+- `min_amount_out_bps` bound to a sane range (e.g. `0 < bps <= 1_000` = up to 10%) to keep
+  keeper-executed swaps profitable/bounded.
+- `swap_receiver` is **optional by semantics**: when a `swap_config` is present the receiver
+  may be the target asset owner's wallet (see `execute_swap`).
+
+### `execute_swap` behavior
+
+`execute_swap` remains keeper-callable and permissionless. When `swap_config` is `Some` the
+legacy transfer branch is replaced by a router invocation:
+
+```rust
+match dca.swap_config {
+    Some(config) => execute_on_dex(&env, &dca, &config),
+    None         => legacy_transfer(&env, &dca),   // existing behavior
+}
+```
+
+`execute_on_dex`:
+
+1. Pulls `amount_per_swap` of `token_in` through `token::Client::transfer` to the router
+   (or approves + transfers, depending on router ABI).
+2. Calls the router's exact-in swap with `amount_out_min` derived from `min_amount_out_bps`.
+3. Confirms the contract (or receiver) received `token_out`; otherwise reverts.
+4. Decrements `remaining_budget` by the **full** `amount_per_swap` (slippage and fees are
+   absorbed by the executed quantity, not the budget).
+5. Flags an `execute_swap` return value with the realized `token_out` amount for keeper
+   observability and partial-fill safety.
+
+### New read functions
+
+- `quote_amount_out(env, dca_id, amount_in) -> i128` — read-only, delegates to
+  `router_get_amounts_out` (Soroswap) / pool `get_reserves` (Phoenix); used by keeper
+  health checks and the frontend.
+- `get_dca_v2(env, dca_id) -> Option<DCAEntry>` — typed read of versioned entries.
+
+### Admin / configuration functions
+
+A `Config` data key holds the canonical Soroswap Router, Soroswap Aggregator, and Phoenix
+Multihop addresses per network, settable by an admin address:
+
+```rust
+pub fn set_config(env: Env, admin: Address, config: Config)
+pub fn get_config(env: Env) -> Config
+```
+
+Keeping router addresses in instance storage (rather than hardcoded) lets the contract
+point at testnet vs mainnet deployments without a redeploy.
