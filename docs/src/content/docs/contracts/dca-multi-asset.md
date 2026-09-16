@@ -328,3 +328,79 @@ open.
 | Soroswap | `SoroswapRouter.swap_exact_tokens_for_tokens` | `recipient.require_auth()` → use policy address, then forward | Yes (via `path`) |
 | Phoenix | `PhoenixMultihop.swap` | Liquidity pool requires pool auth; policy receives output | Yes (via `operations`/`Swap[]`) |
 | Soroswap Aggregator | `swap_exact_tokens_for_tokens` (same shape) | Same as router | Yes (auto) |
+
+## Fee Handling
+
+Fee handling splits into three distinct concerns: **DEX fees**, **keeper execution costs**,
+and **protocol fees**. Each has different accounting semantics in the contract.
+
+### DEX swap fees
+
+Both venues take an in-swap liquidity-provider fee:
+
+- Soroswap pairs charge a fixed liquidity fee (0.30% per swap today; the protocol has an
+  optional 0.05% protocol fee).
+- Phoenix pools charge a trading fee configured per pool.
+
+**Design decision:** DEX fees are *absorbed inside the executed quantity* and **never**
+billed against `remaining_budget`. `amount_per_swap` is decremented from the budget in full;
+the `token_out` amount the keeper records is `amount_in − fee − price_impact`. Consequences:
+
+- Budget exhaustion and execution counts remain deterministic and identical to the legacy
+  contract.
+- A user's eventual `token_out` is `sum(realized_amount_out)` across executions, which the
+  (upcoming) query surface reports for transparency.
+
+### Slippage as a fee guard
+
+`min_amount_out_bps` caps how much of `amount_in` a swap may lose to price movement. The
+contract computes:
+
+```rust
+let amount_out_min = quote(env, amount_per_swap).moving_avg_or_reserves
+    * (10000 - min_amount_out_bps)
+    / 10000;
+```
+
+- Soroswap: call `router_get_amounts_out(amount_in, path)` read-only, then apply the bps
+  haircut.
+- Phoenix: use pool `get_reserves` + constant-product math, then apply the bps haircut.
+
+If the router returns an output below `amount_out_min`, `execute_swap` reverts. The swap is
+not marked executed, so the keeper retries on the next poll — protecting users from a
+slippage spike during a single ledger while staying eventually consistent.
+
+### Keeper execution costs
+
+`execute_swap` is permissionless and paid by whom? Three options, with a recommendation:
+
+| Option | Description | Verdict |
+|---|---|---|
+| Keeper pays | Keeper signs and pays `base_fee` on each `execute_swap` | Keep today's model |
+| Payers pay | Keeper stipend funded by users on top of budget | No — complicates budget math |
+| Sponsored | ChronoStar treasury pays keepers a fixed rate | Out of scope for v1 |
+
+**Recommendation:** retain the current model where the keeper funds transaction fees. The
+per-swap value is set at creation and the DEX fee is the only cost that reduces the fill.
+Chair this if `amount_per_swap` is very small relative to `base_fee` — see
+[Open Questions](/contracts/dca-multi-asset/#open-questions).
+
+### Protocol / take-rate fees (explicitly out of scope)
+
+Whether ChronoStar takes a percentage of `token_out` is a **product decision**, not a
+contract requirement. The design deliberately leaves it out so:
+
+- Budget and authorization semantics stay aligned with the existing contract.
+- Introducing a take-rate later is a pure additive change (a fee collector address in
+  `Config`), implemented through an upgrade with no back-compat break.
+
+### Fee transparency to users
+
+The frontend "Create DCA" form and the DCA detail page should surface:
+
+- The venue's documented swap fee (Soroswap 0.30% per pool hop; Phoenix per-pool fee).
+- The selected slippage bound (`min_amount_out_bps`).
+- A worst-case `amount_out_min` preview via `quote_amount_out`.
+
+This matches the existing docs tone in `docs/src/content/docs/contracts/dca-policy.md` and
+keeps the off-chain estimate honest about fee impact.
