@@ -1,3 +1,4 @@
+import { xdr } from '@stellar/stellar-sdk';
 import { logger, generateCorrelationId } from '../logger.js';
 
 export class VaultWatcher {
@@ -45,16 +46,18 @@ export class VaultWatcher {
         const vault = await this.client.readContract(
           this.contractId,
           'get_vault',
-          [new (await import('@stellar/stellar-sdk')).xdr.ScVal.scvU64(i)],
+          [xdr.ScVal.scvU64(BigInt(i))],
         );
-        if (!vault || !vault._attributes || vault._attributes.status !== 0) continue;
+        if (!Array.isArray(vault) || vault.length === 0) continue;
+        const entry = vault[0];
+        if (entry.status?.[0] !== 'Active') continue;
 
-        const releaseLedger = Number(vault._attributes.release_ledger);
+        const releaseLedger = Number(entry.release_ledger);
         const currentSeq = Number(currentLedger);
         if (currentSeq >= releaseLedger) {
           cycleLogger.info({ vaultId: i }, 'releasing vault');
           await this.client.invokeContract(this.contractId, 'release', [
-            new (await import('@stellar/stellar-sdk')).xdr.ScVal.scvU64(i),
+            xdr.ScVal.scvU64(BigInt(i)),
           ]);
         }
       }

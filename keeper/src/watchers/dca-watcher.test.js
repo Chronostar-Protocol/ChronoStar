@@ -18,7 +18,7 @@ describe('DCAWatcher', () => {
     const client = {
       readContract: mockReadContract([
         1,
-        { _attributes: { status: 0, next_execution_ledger: 100 } },
+        [{ status: ['Active'], next_execution_ledger: 100 }],
         200,
       ]),
       invokeContract,
@@ -35,7 +35,7 @@ describe('DCAWatcher', () => {
     const client = {
       readContract: mockReadContract([
         1,
-        { _attributes: { status: 0, next_execution_ledger: 100 } },
+        [{ status: ['Active'], next_execution_ledger: 100 }],
         200,
       ]),
       invokeContract: mock.fn(),
@@ -58,7 +58,7 @@ describe('DCAWatcher', () => {
     const client = {
       readContract: mockReadContract([
         1,
-        { _attributes: { status: 0, next_execution_ledger: 100 } },
+        [{ status: ['Active'], next_execution_ledger: 100 }],
         200,
       ]),
       invokeContract: mock.fn(),
@@ -80,7 +80,7 @@ describe('DCAWatcher', () => {
     const client = {
       readContract: mockReadContract([
         1,
-        { _attributes: { status: 0, next_execution_ledger: 300 } },
+        [{ status: ['Active'], next_execution_ledger: 300 }],
         200,
       ]),
       invokeContract,

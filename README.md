@@ -24,7 +24,7 @@ Time-based payment primitives for the Stellar ecosystem — scheduled vaults, re
 | Frontend | https://chrono-star.vercel.app |
 | Backend API | https://chronostar-backend-s905.onrender.com |
 | Documentation | https://chronostar-protocol.github.io/ChronoStar |
-| Keeper Bot | Deploy via \`render.yaml\` → Render Background Worker. Set \`KEEPER_SECRET\`, \`VAULT_CONTRACT_ID\`, \`STREAM_CONTRACT_ID\`, \`DCA_CONTRACT_ID\` as Render secrets. |
+| Keeper Bot | https://chronostar-keeper.onrender.com |
 
 ## Architecture
 

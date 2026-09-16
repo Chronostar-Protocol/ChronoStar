@@ -1,3 +1,4 @@
+import { xdr } from '@stellar/stellar-sdk';
 import { logger, generateCorrelationId } from '../logger.js';
 
 export class DCAWatcher {
@@ -38,17 +39,19 @@ export class DCAWatcher {
         const dca = await this.client.readContract(
           this.contractId,
           'get_dca',
-          [new (await import('@stellar/stellar-sdk')).xdr.ScVal.scvU64(i)],
+          [xdr.ScVal.scvU64(BigInt(i))],
         );
-        if (!dca || !dca._attributes || dca._attributes.status !== 0) continue;
+        if (!Array.isArray(dca) || dca.length === 0) continue;
+        const entry = dca[0];
+        if (entry.status?.[0] !== 'Active') continue;
 
         const currentSeq = Number(await this.client.readContract(this.contractId, 'current_ledger', []));
-        const nextExec = Number(dca._attributes.next_execution_ledger);
+        const nextExec = Number(entry.next_execution_ledger);
 
         if (currentSeq >= nextExec) {
           cycleLogger.info({ dcaId: i }, 'executing DCA swap');
           await this.client.invokeContract(this.contractId, 'execute_swap', [
-            new (await import('@stellar/stellar-sdk')).xdr.ScVal.scvU64(i),
+            xdr.ScVal.scvU64(BigInt(i)),
           ]);
         }
       }
