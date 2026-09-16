@@ -15,7 +15,8 @@ Priorities may shift based on community input and ecosystem developments.
 - Extend the DCAPolicy contract to support token-to-token swaps (not just USDC → XLM)
 - Integrate with Stellar DEX contracts (e.g., Soroswap) for on-chain swap execution
 - Update the frontend "Create DCA" form to accept arbitrary token pairs
-- Add multi-asset support scoping document
+- Add multi-asset support scoping document — see
+  [docs/src/content/docs/contracts/dca-multi-asset.md](./docs/src/content/docs/contracts/dca-multi-asset.md)
 
 ### Milestone 3: Mobile-Friendly Frontend
 - Responsive redesign of all pages for mobile screens
