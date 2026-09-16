@@ -224,3 +224,107 @@ pub fn get_config(env: Env) -> Config
 
 Keeping router addresses in instance storage (rather than hardcoded) lets the contract
 point at testnet vs mainnet deployments without a redeploy.
+
+## DEX Integration Points
+
+The contract must be able to route a schedule swap through a Soroban AMM. Two venues are in
+scope for v1: **Soroswap** and **Phoenix**. Both are reachable from a Soroban contract via
+generated clients; neither requires holding user keys as long as the AMM sends output back
+to the `DCAPolicy` contract or the policy's authorized receiver.
+
+### Soroswap
+
+[Soroswap](https://docs.soroswap.finance) is the reference AMM on Soroban. The contract
+calls the **SoroswapRouter** via `contractimport!` on its WASM and invokes
+`swap_exact_tokens_for_tokens`:
+
+```rust
+soroban_sdk::contractimport!(file = "./soroswap_router.wasm");
+pub type SoroswapRouterClient<'a> = Client<'a>;
+
+let router = SoroswapRouterClient::new(&env, &config.dex_address);
+router.swap_exact_tokens_for_tokens(
+    &amount_per_swap,      // amount_in
+    &amount_out_min,       // derived from min_amount_out_bps
+    &path,                 // e.g. [USDC, XLM]
+    &recipient,            // DCAPolicy contract or authorized receiver
+    &deadline_u64,         // current ledger + deadline_offset_ledgers
+);
+```
+
+Key detail: the router calls `recipient.require_auth()`. Therefore `recipient` should be
+the `DCAPolicy` contract itself (which authenticates via `env.current_contract_address()`)
+and the policy then forwards `token_out` to the owner/`swap_receiver`. This avoids signing
+on the user's behalf.
+
+For multi-hop routes the same call accepts `path = [token_in, mid, ..., token_out]`, so
+pairs without direct liquidity (e.g. USDC→EURC via XLM) work with no extra contract work.
+
+Router addresses are read from `Config` / `config.dex_address` and seeded during deployment
+(see [Deployment](/contracts/dca-multi-asset/#deployment-and-configuration)).
+
+### Phoenix
+
+[Phoenix](https://github.com/Phoenix-Protocol-Group/phoenix-contracts) is an order-book /
+AMM hybrid on Soroban. The contract targets the **Phoenix Multihop** contract, which chains
+pools in a single call:
+
+```rust
+let multihop = PhoenixMultihopClient::new(&env, &config.dex_address);
+let swaps: Vec<Swap> = path
+    .windows(2)
+    .map(|w| Swap { ask_asset: w[1].clone(), offer_asset: w[0].clone() })
+    .collect();
+multihop.swap(
+    &recipient,          // DCAPolicy contract
+    &None,               // referral unused
+    &swaps,              // [{USDC, XLM}, {XLM, EURC}] for multi-hop
+    &Some(max_belief_price),
+    &Some(max_spread_bps), // derived from min_amount_out_bps
+    &amount_per_swap,
+);
+```
+
+Phoenix's `Swap { ask_asset, offer_asset }` struct maps naturally to the same `path`
+vector stored on the DCA entry, so the contract needs only a small serialization shim
+between the two ABIs.
+
+### Router ABI abstraction
+
+To keep `execute_swap` ignorant of venue specifics, wrap both clients behind a shared
+internal helper:
+
+```rust
+fn swap_exact_in(
+    env: &Env,
+    provider: &DexProvider,
+    dex_address: &Address,
+    path: &Vec<Address>,
+    amount_in: i128,
+    amount_out_min: i128,
+    recipient: &Address,
+) -> i128
+```
+
+Soroswap targets the router; Phoenix targets multihop. The return value is the realized
+`amount_out`, which feeds the execution-receipt path described in `execute_swap`.
+
+### Future: Soroswap Aggregator
+
+The [Soroswap Aggregator](https://docs.soroswap.finance/aggregator/) splits a single trade
+across supported AMMs (Soroswap, Phoenix, and later Aquarius) and exposes a
+`swap_exact_tokens_for_tokens`-shaped call. Adding it later means:
+
+- New `DexProvider::Aggregator` variant, no new contract logic.
+- Better pricing for thin pairs and the ability to include SDEX-heavy liquidity over time.
+
+This is deliberately deferred — see Non-Goals — but the `DexProvider` enum keeps the door
+open.
+
+### Integration contract checklist
+
+| Venue | Entry point | Output auth model | Multi-hop |
+|---|---|---|---|
+| Soroswap | `SoroswapRouter.swap_exact_tokens_for_tokens` | `recipient.require_auth()` → use policy address, then forward | Yes (via `path`) |
+| Phoenix | `PhoenixMultihop.swap` | Liquidity pool requires pool auth; policy receives output | Yes (via `operations`/`Swap[]`) |
+| Soroswap Aggregator | `swap_exact_tokens_for_tokens` (same shape) | Same as router | Yes (auto) |
