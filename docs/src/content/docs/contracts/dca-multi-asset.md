@@ -404,3 +404,78 @@ The frontend "Create DCA" form and the DCA detail page should surface:
 
 This matches the existing docs tone in `docs/src/content/docs/contracts/dca-policy.md` and
 keeps the off-chain estimate honest about fee impact.
+
+## Migration Path for Existing DCAs
+
+Existing DCAs were created with the `DCA(u64)` key, a `swap_receiver`, and **no**
+`token_out`. They are not broken — they are "forward-only" policies. The migration strategy
+keeps them live while enabling the new behavior.
+
+### Backward compatibility
+
+- **Legacy entries stay spendable.** `execute_swap` checks `swap_config`. A legacy entry
+  (`None`) takes the existing `transfer(swap_receiver, amount_per_swap)` branch exactly as it
+  does on `master` today. No legacy policy is blocked or requires user action.
+- **Cancellation/refunds unchanged.** `cancel` already returns `remaining_budget` in
+  `token_in`, which is still correct — `token_in` is unchanged for legacy entries.
+- **Reads:** `get_dca` reads `DCA(u64)`; `get_dca_v2` reads `DCAV2(u64)`. The keeper and
+  backend are updated to prefer v2 and fall back to v1 (see below).
+
+### Versioned storage & lazy migration
+
+New entries are always written to `DCAV2(u64)`. Instead of one big migration transaction,
+the contract lazily upgrades a `DCA(u64)` entry into `DCAV2(u64)` the first time it is
+touched (read or executed):
+
+```rust
+fn load_dca(env: &Env, id: u64) -> DCAEntry {
+    match env.storage().persistent().get::<DataKey, DCAEntry>(&DataKey::DCAV2(id)) {
+        Some(dca) => dca,
+        None => {
+            let v1: DCAEntryV1 = env.storage().persistent().get(&DataKey::DCA(id))
+                .expect("DCA not found");
+            let v2 = v1.into_v2(); // token_out = None marker, swap_config = None
+            env.storage().persistent().set(&DataKey::DCAV2(id), &v2);
+            env.storage().persistent().remove(&DataKey::DCA(id));
+            v2
+        }
+    }
+}
+```
+
+Benefits:
+
+- No mass migration script, no downtime, no keeper orchestrating an upgrade.
+- Storage churn is proportional to actually-touched entries only.
+- Old `DCA` keys naturally evaporate as policies finish or migrate.
+
+### Treating legacy entries as v2 "forward-only"
+
+A legacy entry migrated to v2 has `token_out = None` and `swap_config = None`. Administratively
+we expose them as **"Send-only"** policies in the UI (budget + schedule, no swap). A future
+"upgrade this DCA" button may let an owner convert a send-only policy into a swap policy by
+providing `token_out` + `path`, opening a new `DCAV2` entry and cancelling the old one with a
+refund — a pure user-initiated migration and out of v1 scope.
+
+### Keeper, backend, and frontend impact
+
+- **Keeper** (`keeper/src/watchers/dca-watcher.js`): read `get_dca_v2`; on success execute
+  `execute_swap` (unchanged entry point); on v1 upgrade fallback read `get_dca`. Surface
+  realized `token_out` from the return value for metrics.
+- **Backend** (`backend/src/routes/streams.js` `createDCARouter`): map `get_dca_v2` into the
+  same response shape, exposing `token_out`, `swap_config`, and `amount_out` where present.
+- **Frontend** (`frontend/src/app/dca/new/page.tsx` and detail views): add token-out picker,
+  paired-selector, route/path preview + slippage field; render legacy entries as send-only.
+  Freighter must be on the target network with a trustline for `token_out`.
+
+### Deployment and configuration
+
+`contract/DEPLOY.md` gains a router-config step: after deploying `DCAPolicy`, call
+`set_config` with:
+
+- Soroswap Router (mainnet `CAG5LRYQ...` / per-testnet seed).
+- Phoenix Multihop address for the target network.
+- Admin address (deployer).
+
+This keeps `Config` per-network correct without code changes (see
+[Admin / configuration functions](/contracts/dca-multi-asset/#admin--configuration-functions)).
