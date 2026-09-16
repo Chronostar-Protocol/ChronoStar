@@ -36,26 +36,7 @@ export default function VaultDetailPage() {
   }, [fetchVault]);
 
   if (loading) {
-    return <p className="text-text-muted text-center py-20">Loading...</p>;
-    api.getSchedules(address).then(vaults => {
-      const found = vaults.find(v => v.id === Number(id));
-      if (found) setVault(found);
-    }).finally(() => setLoading(false));
-  }, [address, id]);
-
-  if (loading) {
     return <DetailPageSkeleton />;
-  }
-
-  if (!vault) {
-    return (
-      <div className="text-center py-20">
-        <p className="text-text-muted">Vault not found.</p>
-        <Link href="/dashboard" className="text-sm text-accent-blue hover:underline mt-2 inline-block">
-          &larr; Back to Dashboard
-        </Link>
-      </div>
-    );
   }
 
   if (error) {
@@ -82,20 +63,31 @@ export default function VaultDetailPage() {
     );
   }
 
+  if (!vault) {
+    return (
+      <div className="text-center py-20">
+        <p className="text-text-muted">Vault not found.</p>
+        <Link href="/dashboard" className="text-sm text-accent-blue hover:underline mt-2 inline-block">
+          &larr; Back to Dashboard
+        </Link>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-lg mx-auto">
       <Link href="/dashboard" className="text-sm text-accent-blue hover:underline">&larr; Dashboard</Link>
-      <h1 className="text-2xl font-heading font-bold text-text-primary mt-4 mb-6">Vault #{vault!.id}</h1>
+      <h1 className="text-2xl font-heading font-bold text-text-primary mt-4 mb-6">Vault #{vault.id}</h1>
 
       <div className="space-y-3 p-4 rounded-lg border border-border bg-bg-card">
-        <DetailRow label="Label" value={vault!.label} />
-        <DetailRow label="Recipient" value={vault!.recipient} />
-        <DetailRow label="Amount" value={vault!.amount} />
-        <DetailRow label="Release Ledger" value={String(vault!.release_ledger)} />
-        <DetailRow label="Status" value={vault!.status} />
+        <DetailRow label="Label" value={vault.label} />
+        <DetailRow label="Recipient" value={vault.recipient} />
+        <DetailRow label="Amount" value={vault.amount} />
+        <DetailRow label="Release Ledger" value={String(vault.release_ledger)} />
+        <DetailRow label="Status" value={vault.status} />
       </div>
 
-      {vault!.status === 'Active' && (
+      {vault.status === 'Active' && (
         <button
           onClick={() => setTxStatus('pending')}
           className="mt-6 w-full py-3 rounded-lg bg-accent-red text-white font-medium hover:opacity-90"
