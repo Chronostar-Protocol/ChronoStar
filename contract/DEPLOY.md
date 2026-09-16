@@ -52,6 +52,31 @@ stellar contract deploy \
 ```
 → Copy printed contract ID → `DCA_CONTRACT_ID`
 
+### 5. Configure DEX routers (Multi-Asset DCA)
+
+The DCAPolicy contract reads Soroswap/Phoenix router addresses from its `Config` key.
+After deploying (or upgrading to) the multi-asset build, point `set_config` at the
+routers for the target network:
+
+```bash
+stellar contract invoke \
+  --id $DCA_CONTRACT_ID \
+  --source deployer \
+  --network testnet \
+  -- \
+  set_config \
+  --admin deployer \
+  --soroswap_router C... \
+  --phoenix_multihop C... \
+  --soroswap_aggregator C...
+```
+
+- Soroswap Router (mainnet): `CAG5LRYQ5JVEUI5TEID72EYOVX44TTUJT5BQR2J6J77FH65PCCFAJDDH`
+- Soroswap/testnet router, Phoenix Multihop: query the respective protocol docs per network.
+
+See the [Multi-Asset DCA design document](../docs/src/content/docs/contracts/dca-multi-asset.md)
+for contract changes, fee handling, and migration details.
+
 ## Fund Keeper Wallet
 
 ```bash

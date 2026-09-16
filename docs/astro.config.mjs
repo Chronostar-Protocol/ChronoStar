@@ -25,6 +25,7 @@ export default defineConfig({
             { label: 'ScheduleVault', link: '/contracts/schedule-vault/' },
             { label: 'RecurringStream', link: '/contracts/recurring-stream/' },
             { label: 'DCAPolicy', link: '/contracts/dca-policy/' },
+            { label: 'Multi-Asset DCA (Design)', link: '/contracts/dca-multi-asset/' },
           ],
         },
         {
