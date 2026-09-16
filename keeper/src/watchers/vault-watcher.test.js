@@ -16,7 +16,7 @@ describe('VaultWatcher', () => {
   it('triggers release for a due vault', async () => {
     const invokeContract = mock.fn();
     const client = {
-      readContract: mockReadContract([100, 1, { _attributes: { status: 0, release_ledger: 100 } }]),
+      readContract: mockReadContract([100, 1, [{ status: ['Active'], release_ledger: 100 }]]),
       invokeContract,
     };
 
@@ -30,7 +30,7 @@ describe('VaultWatcher', () => {
   it('attaches a correlation ID to all log entries in a poll cycle', async () => {
     const invokeContract = mock.fn();
     const client = {
-      readContract: mockReadContract([100, 1, { _attributes: { status: 0, release_ledger: 100 } }]),
+      readContract: mockReadContract([100, 1, [{ status: ['Active'], release_ledger: 100 }]]),
       invokeContract,
     };
     const parent = mockLogger();
@@ -49,7 +49,7 @@ describe('VaultWatcher', () => {
 
   it('generates a unique correlation ID per poll cycle', async () => {
     const client = {
-      readContract: mockReadContract([100, 1, { _attributes: { status: 0, release_ledger: 100 } }]),
+      readContract: mockReadContract([100, 1, [{ status: ['Active'], release_ledger: 100 }]]),
       invokeContract: mock.fn(),
     };
     const parent = mockLogger();
@@ -67,7 +67,7 @@ describe('VaultWatcher', () => {
   it('skips non-due vaults', async () => {
     const invokeContract = mock.fn();
     const client = {
-      readContract: mockReadContract([50, 1, { _attributes: { status: 0, release_ledger: 100 } }]),
+      readContract: mockReadContract([50, 1, [{ status: ['Active'], release_ledger: 100 }]]),
       invokeContract,
     };
 
@@ -80,7 +80,7 @@ describe('VaultWatcher', () => {
   it('skips non-active vaults', async () => {
     const invokeContract = mock.fn();
     const client = {
-      readContract: mockReadContract([100, 1, { _attributes: { status: 1, release_ledger: 50 } }]),
+      readContract: mockReadContract([100, 1, [{ status: ['Released'], release_ledger: 50 }]]),
       invokeContract,
     };
 
