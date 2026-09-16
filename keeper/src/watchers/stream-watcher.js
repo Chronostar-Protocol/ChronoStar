@@ -1,3 +1,4 @@
+import { xdr } from '@stellar/stellar-sdk';
 import { logger, generateCorrelationId } from '../logger.js';
 
 export class StreamWatcher {
@@ -38,17 +39,19 @@ export class StreamWatcher {
         const stream = await this.client.readContract(
           this.contractId,
           'get_stream',
-          [new (await import('@stellar/stellar-sdk')).xdr.ScVal.scvU64(i)],
+          [xdr.ScVal.scvU64(BigInt(i))],
         );
-        if (!stream || !stream._attributes || stream._attributes.status !== 0) continue;
+        if (!Array.isArray(stream) || stream.length === 0) continue;
+        const entry = stream[0];
+        if (entry.status?.[0] !== 'Active') continue;
 
         const currentSeq = Number(await this.client.readContract(this.contractId, 'current_ledger', []));
-        const endLedger = Number(stream._attributes.end_ledger);
+        const endLedger = Number(entry.end_ledger);
 
         if (currentSeq >= endLedger) {
           cycleLogger.info({ streamId: i }, 'ticking completed stream');
           await this.client.invokeContract(this.contractId, 'tick', [
-            new (await import('@stellar/stellar-sdk')).xdr.ScVal.scvU64(i),
+            xdr.ScVal.scvU64(BigInt(i)),
           ]);
         }
       }
