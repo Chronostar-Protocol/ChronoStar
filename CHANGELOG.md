@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `LICENSE`, `ROADMAP.md` community health files
 - CI lint jobs (`cargo fmt`, `cargo clippy`, ESLint) added to test workflows
 - Issue templates (`bug_report.md`, `good_first_issue.md`) for structured contributions
+- Multi-asset DCA design & scoping document (`docs/.../contracts/dca-multi-asset.md`)
 
 ### Fixed
 - CI branch triggers changed from `main` to `master` to match default branch
