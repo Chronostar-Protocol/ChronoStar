@@ -67,6 +67,14 @@ cd contract && cargo test
 # Backend
 cd backend && npm test
 
+# Backend integration (requires Docker + Stellar CLI; spins up a local
+# Soroban sandbox, seeds the three contracts, and runs supertest against
+# the real routes)
+cd backend && npm run test:integration
+
+# Tests are deterministic but each run completes a fresh seed; the sandbox
+# container is stopped afterwards unless KEEP_SANDBOX=1 is set.
+
 # Keeper
 cd keeper && npm test
 

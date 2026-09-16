@@ -8,7 +8,8 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
-    "test": "node --test src/**/*.test.js"
+    "test": "node --test src/**/*.test.js",
+    "test:integration": "node --test --test-concurrency=1 test/integration.test.js"
   },
   "dependencies": {
     "@stellar/stellar-sdk": "^13.0.0",

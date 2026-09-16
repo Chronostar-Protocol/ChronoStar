@@ -1,0 +1,49 @@
+name: Test Backend
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'backend/**'
+      - 'contract/**'
+      - 'scripts/seed.js'
+      - '.github/workflows/test-backend-integration.yml'
+  pull_request:
+    paths:
+      - 'backend/**'
+      - 'contract/**'
+      - 'scripts/seed.js'
+      - '.github/workflows/test-backend-integration.yml'
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - run: npm install
+        working-directory: backend
+      - run: npm test
+        working-directory: backend
+
+  integration:
+    runs-on: ubuntu-latest
+    needs: unit
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - run: npm install
+        working-directory: backend
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          target: wasm32-unknown-unknown
+      - run: cargo build --release --target wasm32-unknown-unknown
+        working-directory: contract
+      - uses: stellar/stellar-cli@v25.1.0
+      - name: Run integration tests against a local sandbox
+        run: npm run test:integration
+        working-directory: backend

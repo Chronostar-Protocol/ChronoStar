@@ -4,7 +4,8 @@ import { logger } from './logger.js';
 
 export class SorobanClient {
   constructor() {
-    this.server = new rpc.Server(config.rpcUrl);
+    const isInsecureHttp = config.rpcUrl.startsWith('http://');
+    this.server = new rpc.Server(config.rpcUrl, { allowHttp: isInsecureHttp });
     this.networkPassphrase = config.networkPassphrase;
   }
 
@@ -27,11 +28,38 @@ export class SorobanClient {
   async readContract(contractId, method, args) {
     const sim = await this.simulate(contractId, method, args);
     if (!sim?.result?.retval) return null;
-    return scValToNative(sim.result.retval);
+    return normalizeNative(scValToNative(sim.result.retval));
   }
 
-  scvU64(val) { return xdr.ScVal.scvU64(val); }
+  scvU64(val) { return xdr.ScVal.scvU64(BigInt(val)); }
   scvAddress(addr) {
     return Address.fromString(addr).toScVal();
   }
 }
+
+function normalizeNative(value) {
+  if (typeof value === 'bigint') {
+    return Number(value);
+  }
+  if (Array.isArray(value)) {
+    if (value.length === 1 && typeof value[0] === 'string') {
+      const ordinal = STATUS_ORDINALS[value[0]];
+      if (ordinal !== undefined) return ordinal;
+    }
+    return value.map(normalizeNative);
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, val]) => [key, normalizeNative(val)]),
+    );
+  }
+  return value;
+}
+
+const STATUS_ORDINALS = {
+  Active: 0,
+  Released: 1,
+  Completed: 1,
+  Exhausted: 1,
+  Cancelled: 2,
+};
