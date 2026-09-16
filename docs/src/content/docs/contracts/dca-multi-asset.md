@@ -7,7 +7,7 @@ description: Design and scoping document for extending DCAPolicy to arbitrary to
 
 - **Type:** RFC / scoping document
 - **Owner:** ChronoStar maintainers
-- **Tracking:** [ROADMAP Milestone 2 – Multi-Asset DCA Support](/roadmap)
+- **Tracking:** [ROADMAP Milestone 2 – Multi-Asset DCA Support](https://github.com/Chronostar-Protocol/ChronoStar/blob/master/ROADMAP.md)
 - **Last updated:** 2026-09-16
 
 ## TL;DR
