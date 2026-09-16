@@ -36,7 +36,7 @@ export default function DCADetailPage() {
   }, [fetchDCA]);
 
   if (loading) {
-    return <p className="text-text-muted text-center py-20">Loading...</p>;
+    return <DetailPageSkeleton />;
   }
 
   if (error) {
@@ -59,14 +59,8 @@ export default function DCADetailPage() {
             &larr; Dashboard
           </Link>
         </div>
-    api.getDCA(address).then(dcas => {
-      const found = dcas.find(d => d.id === Number(id));
-      if (found) setDca(found);
-    }).finally(() => setLoading(false));
-  }, [address, id]);
-
-  if (loading) {
-    return <DetailPageSkeleton />;
+      </div>
+    );
   }
 
   if (!dca) {
@@ -80,27 +74,27 @@ export default function DCADetailPage() {
     );
   }
 
-  const completed = dca!.executions_completed;
-  const totalExecs = dca!.total_budget && dca!.amount_per_swap
-    ? Math.floor(Number(dca!.total_budget) / Number(dca!.amount_per_swap))
+  const completed = dca.executions_completed;
+  const totalExecs = dca.total_budget && dca.amount_per_swap
+    ? Math.floor(Number(dca.total_budget) / Number(dca.amount_per_swap))
     : 0;
 
   return (
     <div className="max-w-lg mx-auto">
       <Link href="/dashboard" className="text-sm text-accent-blue hover:underline">&larr; Dashboard</Link>
-      <h1 className="text-2xl font-heading font-bold text-text-primary mt-4 mb-6">DCA Policy #{dca!.id}</h1>
+      <h1 className="text-2xl font-heading font-bold text-text-primary mt-4 mb-6">DCA Policy #{dca.id}</h1>
 
       <div className="space-y-3 p-4 rounded-lg border border-border bg-bg-card">
-        <DetailRow label="Label" value={dca!.label} />
-        <DetailRow label="Total Budget" value={dca!.total_budget} />
-        <DetailRow label="Remaining" value={dca!.remaining_budget} />
-        <DetailRow label="Per Swap" value={dca!.amount_per_swap} />
+        <DetailRow label="Label" value={dca.label} />
+        <DetailRow label="Total Budget" value={dca.total_budget} />
+        <DetailRow label="Remaining" value={dca.remaining_budget} />
+        <DetailRow label="Per Swap" value={dca.amount_per_swap} />
         <DetailRow label="Executions" value={`${completed} / ${totalExecs}`} />
-        <DetailRow label="Next Execution" value={String(dca!.next_execution_ledger)} />
-        <DetailRow label="Status" value={dca!.status} />
+        <DetailRow label="Next Execution" value={String(dca.next_execution_ledger)} />
+        <DetailRow label="Status" value={dca.status} />
       </div>
 
-      {dca!.status === 'Active' && (
+      {dca.status === 'Active' && (
         <button
           onClick={() => setTxStatus('pending')}
           className="mt-6 w-full py-3 rounded-lg bg-accent-red text-white font-medium hover:opacity-90"

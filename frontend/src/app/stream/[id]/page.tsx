@@ -36,7 +36,7 @@ export default function StreamDetailPage() {
   }, [fetchStream]);
 
   if (loading) {
-    return <p className="text-text-muted text-center py-20">Loading...</p>;
+    return <DetailPageSkeleton />;
   }
 
   if (error) {
@@ -59,14 +59,8 @@ export default function StreamDetailPage() {
             &larr; Dashboard
           </Link>
         </div>
-    api.getStreams(address).then(streams => {
-      const found = streams.find(s => s.id === Number(id));
-      if (found) setStream(found);
-    }).finally(() => setLoading(false));
-  }, [address, id]);
-
-  if (loading) {
-    return <DetailPageSkeleton />;
+      </div>
+    );
   }
 
   if (!stream) {
@@ -80,26 +74,26 @@ export default function StreamDetailPage() {
     );
   }
 
-  const claimed = Number(stream!.claimed_amount);
-  const total = Number(stream!.total_amount);
+  const claimed = Number(stream.claimed_amount);
+  const total = Number(stream.total_amount);
   const progress = total > 0 ? (claimed / total) * 100 : 0;
 
   return (
     <div className="max-w-lg mx-auto">
       <Link href="/dashboard" className="text-sm text-accent-blue hover:underline">&larr; Dashboard</Link>
-      <h1 className="text-2xl font-heading font-bold text-text-primary mt-4 mb-6">Stream #{stream!.id}</h1>
+      <h1 className="text-2xl font-heading font-bold text-text-primary mt-4 mb-6">Stream #{stream.id}</h1>
 
       <div className="space-y-3 p-4 rounded-lg border border-border bg-bg-card">
-        <DetailRow label="Label" value={stream!.label} />
-        <DetailRow label="Recipient" value={stream!.recipient} />
-        <DetailRow label="Total Amount" value={stream!.total_amount} />
-        <DetailRow label="Claimed" value={stream!.claimed_amount} />
+        <DetailRow label="Label" value={stream.label} />
+        <DetailRow label="Recipient" value={stream.recipient} />
+        <DetailRow label="Total Amount" value={stream.total_amount} />
+        <DetailRow label="Claimed" value={stream.claimed_amount} />
         <DetailRow label="Progress" value={`${progress.toFixed(1)}%`} />
-        <DetailRow label="End Ledger" value={String(stream!.end_ledger)} />
-        <DetailRow label="Status" value={stream!.status} />
+        <DetailRow label="End Ledger" value={String(stream.end_ledger)} />
+        <DetailRow label="Status" value={stream.status} />
       </div>
 
-      {stream!.status === 'Active' && (
+      {stream.status === 'Active' && (
         <button
           onClick={() => setTxStatus('pending')}
           className="mt-6 w-full py-3 rounded-lg bg-accent-green text-white font-medium hover:opacity-90"

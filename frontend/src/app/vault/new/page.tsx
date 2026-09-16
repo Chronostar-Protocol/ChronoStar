@@ -34,13 +34,14 @@ export default function CreateVaultPage() {
     <div className="max-w-lg mx-auto">
       <h1 className="text-2xl font-heading font-bold text-text-primary mb-6">Create Vault</h1>
       <form onSubmit={handleSubmit} className="space-y-4">
-        <Field label="Recipient Address" value={recipient} onChange={setRecipient} placeholder="G..." />
-        <Field label="Token Address" value={token} onChange={setToken} placeholder="C..." />
-        <Field label="Amount" type="number" value={amount} onChange={setAmount} placeholder="1000000" />
-        <Field label="Release Ledger" type="number" value={releaseLedger} onChange={setReleaseLedger} placeholder="e.g. 2000000" />
-        <Field label="Label" value={label} onChange={setLabel} placeholder="My vault" maxLength={64} />
+        <Field testid="recipient-address" label="Recipient Address" value={recipient} onChange={setRecipient} placeholder="G..." />
+        <Field testid="token-address" label="Token Address" value={token} onChange={setToken} placeholder="C..." />
+        <Field testid="amount" label="Amount" type="number" value={amount} onChange={setAmount} placeholder="1000000" />
+        <Field testid="release-ledger" label="Release Ledger" type="number" value={releaseLedger} onChange={setReleaseLedger} placeholder="e.g. 2000000" />
+        <Field testid="label" label="Label" value={label} onChange={setLabel} placeholder="My vault" maxLength={64} />
         <button
           type="submit"
+          data-testid="create-vault-submit"
           className="w-full py-3 rounded-lg bg-accent-blue text-white font-medium hover:opacity-90 transition-opacity"
         >
           Create Vault
@@ -51,13 +52,14 @@ export default function CreateVaultPage() {
   );
 }
 
-function Field({ label, type = 'text', value, onChange, placeholder, maxLength }: {
-  label: string; type?: string; value: string; onChange: (v: string) => void; placeholder?: string; maxLength?: number;
+function Field({ label, type = 'text', value, onChange, placeholder, maxLength, testid }: {
+  label: string; type?: string; value: string; onChange: (v: string) => void; placeholder?: string; maxLength?: number; testid?: string;
 }) {
   return (
     <div>
       <label className="block text-sm text-text-muted mb-1">{label}</label>
       <input
+        data-testid={testid}
         type={type}
         value={value}
         onChange={e => onChange(e.target.value)}
