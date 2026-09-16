@@ -1,7 +1,10 @@
 services:
   - type: worker
     name: chronostar-keeper
-    env: node
+    runtime: node
+    rootDir: keeper
+    region: oregon
+    plan: free
     buildCommand: npm install
     startCommand: npm start
     envVars:
