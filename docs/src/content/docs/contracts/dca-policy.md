@@ -11,6 +11,10 @@ DCAPolicy lets you commit a budget and auto-execute fixed-size swaps on a recurr
 - **Recurring payments**: Send a fixed amount to a service each week
 - **Treasury management**: Accumulate assets over time
 
+> **Note:** This page documents the current single-asset (USDC → receiver) behavior.
+> Support for arbitrary token pairs (e.g. USDC → EURC, XLM → USDC) is covered by the
+> [Multi-Asset DCA design document](/contracts/dca-multi-asset/).
+
 ## Interface
 
 ### `create_dca`
