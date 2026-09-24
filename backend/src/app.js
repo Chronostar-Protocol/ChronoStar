@@ -7,8 +7,9 @@ import { createSchedulesRouter } from './routes/schedules.js';
 import { createStreamsRouter, createDCARouter } from './routes/streams.js';
 import { createEventsRouter } from './routes/events.js';
 import { createStatsRouter } from './routes/stats.js';
+import { EventStore } from './store.js';
 
-export function createApp(clients, log = logger) {
+export function createApp(clients, log = logger, store = new EventStore()) {
   const app = express();
 
   app.use(cors());
@@ -22,7 +23,7 @@ export function createApp(clients, log = logger) {
   app.use('/api/schedules', createSchedulesRouter(clients.vault.client, clients.vault.contractId));
   app.use('/api/streams', createStreamsRouter(clients.stream.client, clients.stream.contractId));
   app.use('/api/dca', createDCARouter(clients.dca.client, clients.dca.contractId));
-  app.use('/api/events', createEventsRouter(clients, log));
+  app.use('/api/events', createEventsRouter(clients, log, store));
   app.use('/api/stats', createStatsRouter(clients));
 
   app.get('/healthz', (_req, res) => res.json({ status: 'ok' }));

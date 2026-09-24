@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { eventsLimiter } from '../middleware.js';
 
-export function createEventsRouter(clients, logger) {
+export function createEventsRouter(clients, logger, store) {
   const router = Router();
 
   router.get('/', eventsLimiter, async (req, res, next) => {
@@ -39,6 +39,7 @@ export function createEventsRouter(clients, logger) {
 
       events.sort((a, b) => a.remainingLedgers - b.remainingLedgers);
       const limit = Math.min(parseInt(req.query.limit || '50', 10), 100);
+      if (store) await store.append(events);
       res.json(events.slice(0, limit));
     } catch (err) {
       next(err);

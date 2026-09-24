@@ -1,0 +1,5 @@
+{
+  "contract": "recurring-stream",
+  "source": "generated with scripts/generate-contract-specs.sh",
+  "metadata": { "name": "ChronoStar Recurring Stream", "version": "0.1.0" }
+}

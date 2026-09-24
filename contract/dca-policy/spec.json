@@ -1,0 +1,5 @@
+{
+  "contract": "dca-policy",
+  "source": "generated with scripts/generate-contract-specs.sh",
+  "metadata": { "name": "ChronoStar DCA Policy", "version": "0.1.0" }
+}

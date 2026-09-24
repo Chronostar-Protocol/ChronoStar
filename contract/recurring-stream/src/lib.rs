@@ -1,5 +1,15 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, contracttype, token, Address, Env, String, Vec};
+use soroban_sdk::{
+    contract, contractimpl, contractmeta, contracttype, symbol_short, token, Address, Env, String,
+    Vec,
+};
+
+contractmeta!(key = "name", val = "ChronoStar Recurring Stream");
+contractmeta!(key = "version", val = "0.1.0");
+contractmeta!(
+    key = "description",
+    val = "Recurring Stellar token payment streams"
+);
 
 #[contracttype]
 pub enum DataKey {
@@ -185,6 +195,15 @@ impl RecurringStream {
             &claimable,
         );
 
+        env.events()
+            .publish((symbol_short!("claimed"), stream_id), claimable);
+        if stream.status == StreamStatus::Completed {
+            env.events().publish(
+                (symbol_short!("completed"), stream_id),
+                stream.recipient.clone(),
+            );
+        }
+
         claimable
     }
 
@@ -206,6 +225,10 @@ impl RecurringStream {
             env.storage()
                 .persistent()
                 .set(&DataKey::Stream(stream_id), &stream);
+            env.events().publish(
+                (symbol_short!("completed"), stream_id),
+                stream.recipient.clone(),
+            );
         }
 
         env.storage()
@@ -246,6 +269,10 @@ impl RecurringStream {
         env.storage()
             .persistent()
             .set(&DataKey::Stream(stream_id), &stream);
+        env.events().publish(
+            (symbol_short!("cancelled"), stream_id),
+            stream.owner.clone(),
+        );
     }
 
     pub fn get_stream(env: Env, stream_id: u64) -> Option<StreamEntry> {
