@@ -1,0 +1,5 @@
+{
+  "contract": "schedule-vault",
+  "source": "generated with scripts/generate-contract-specs.sh",
+  "metadata": { "name": "ChronoStar Schedule Vault", "version": "0.1.0" }
+}

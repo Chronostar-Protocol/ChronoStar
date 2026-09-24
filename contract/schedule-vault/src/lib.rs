@@ -1,5 +1,15 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, contracttype, token, Address, Env, String, Vec};
+use soroban_sdk::{
+    contract, contractimpl, contractmeta, contracttype, symbol_short, token, Address, Env, String,
+    Vec,
+};
+
+contractmeta!(key = "name", val = "ChronoStar Schedule Vault");
+contractmeta!(key = "version", val = "0.1.0");
+contractmeta!(
+    key = "description",
+    val = "Time-locked Stellar token vaults"
+);
 
 #[contracttype]
 pub enum DataKey {
@@ -129,6 +139,11 @@ impl ScheduleVault {
             &vault.amount,
         );
 
+        env.events().publish(
+            (symbol_short!("released"), vault_id),
+            vault.recipient.clone(),
+        );
+
         env.storage()
             .persistent()
             .extend_ttl(&DataKey::Vault(vault_id), 6_312_000, 6_312_000);
@@ -155,6 +170,8 @@ impl ScheduleVault {
 
         let token_client = token::Client::new(&env, &vault.token);
         token_client.transfer(&env.current_contract_address(), &vault.owner, &vault.amount);
+        env.events()
+            .publish((symbol_short!("cancelled"), vault_id), vault.owner.clone());
     }
 
     pub fn get_vault(env: Env, vault_id: u64) -> Option<VaultEntry> {

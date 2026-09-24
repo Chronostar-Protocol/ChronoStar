@@ -1,5 +1,15 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, contracttype, token, Address, Env, String, Vec};
+use soroban_sdk::{
+    contract, contractimpl, contractmeta, contracttype, symbol_short, token, Address, Env, String,
+    Vec,
+};
+
+contractmeta!(key = "name", val = "ChronoStar DCA Policy");
+contractmeta!(key = "version", val = "0.1.0");
+contractmeta!(
+    key = "description",
+    val = "Automated dollar-cost averaging policies"
+);
 
 #[contracttype]
 pub enum DataKey {
@@ -156,6 +166,8 @@ impl DCAPolicy {
         env.storage()
             .persistent()
             .extend_ttl(&DataKey::DCA(dca_id), 6_312_000, 6_312_000);
+        env.events()
+            .publish((symbol_short!("swap"), dca_id), dca.executions_completed);
     }
 
     pub fn cancel(env: Env, dca_id: u64) {
@@ -180,6 +192,8 @@ impl DCAPolicy {
         dca.remaining_budget = 0;
         dca.status = DCAStatus::Cancelled;
         env.storage().persistent().set(&DataKey::DCA(dca_id), &dca);
+        env.events()
+            .publish((symbol_short!("cancelled"), dca_id), dca.owner.clone());
     }
 
     pub fn get_dca(env: Env, dca_id: u64) -> Option<DCAEntry> {
