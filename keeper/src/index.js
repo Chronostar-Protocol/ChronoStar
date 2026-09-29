@@ -1,4 +1,4 @@
-import { config } from './config.js';
+import { config, validateConfig } from './config.js';
 import { logger } from './logger.js';
 import { SorobanClient } from './soroban-client.js';
 import { VaultWatcher, StreamWatcher, DCAWatcher } from './watchers/index.js';
@@ -6,6 +6,15 @@ import { createServer } from './http.js';
 
 async function main() {
   logger.info('ChronoStar Keeper starting');
+
+  // #101 — fail fast on invalid config instead of crashing later deep inside
+  // a watcher/RPC call.
+  try {
+    validateConfig();
+  } catch (err) {
+    logger.error({ err }, 'Invalid keeper configuration');
+    process.exit(1);
+  }
 
   const client = new SorobanClient();
   await client.init();
