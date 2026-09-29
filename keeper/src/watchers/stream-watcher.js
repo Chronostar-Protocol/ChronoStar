@@ -1,24 +1,34 @@
 import { xdr } from '@stellar/stellar-sdk';
 import { logger, generateCorrelationId } from '../logger.js';
+import { withJitter } from '../poll-jitter.js';
 
 export class StreamWatcher {
   constructor(sorobanClient, contractId, parentLogger = logger) {
     this.client = sorobanClient;
     this.contractId = contractId;
-    this.interval = null;
+    this.timer = null;
     this.logger = parentLogger;
   }
 
   start(pollIntervalMs) {
     this.logger.info({ contractId: this.contractId }, 'StreamWatcher started');
+    this.pollIntervalMs = pollIntervalMs;
     this.poll();
-    this.interval = setInterval(() => this.poll(), pollIntervalMs);
+    this.scheduleNext();
+  }
+
+  // Randomized jitter (#103) instead of a fixed setInterval so multiple
+  // watcher/keeper instances don't all hit the RPC endpoint in lockstep.
+  scheduleNext() {
+    this.timer = setTimeout(() => {
+      this.poll().finally(() => this.scheduleNext());
+    }, withJitter(this.pollIntervalMs));
   }
 
   stop() {
-    if (this.interval) {
-      clearInterval(this.interval);
-      this.interval = null;
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
     }
   }
 
