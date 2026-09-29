@@ -96,6 +96,11 @@ cd frontend && npm run build && npm run lint
   - `refactor:` — code restructuring without behavior change
   - `test:` — adding or updating tests
 
+## Review Expectations
+
+- Contract changes should be reviewed by a contract owner listed in `.github/CODEOWNERS`. Regenerate contract specs with `scripts/generate-contract-specs.sh` and include the generated changes.
+- Workflow changes should be reviewed by the workflow owner listed in `.github/CODEOWNERS`. Describe changes to permissions, secrets, and third-party actions in the pull request.
+
 ## Issue Labels & Drips Wave Points
 
 Issues are labeled by complexity for the Drips Network Stellar Wave Program:
