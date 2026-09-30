@@ -62,4 +62,5 @@ const STATUS_ORDINALS = {
   Completed: 1,
   Exhausted: 1,
   Cancelled: 2,
+  Paused: 3,
 };

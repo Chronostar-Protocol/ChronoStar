@@ -30,6 +30,7 @@ pub struct VaultEntry {
     pub created_ledger: u32,
     pub label: String,
     pub status: VaultStatus,
+    pub paused_at_ledger: Option<u32>,
 }
 
 #[contracttype]
@@ -38,6 +39,7 @@ pub enum VaultStatus {
     Active,
     Released,
     Cancelled,
+    Paused,
 }
 
 #[contract]
@@ -88,6 +90,7 @@ impl ScheduleVault {
             created_ledger: env.ledger().sequence(),
             label,
             status: VaultStatus::Active,
+            paused_at_ledger: None,
         };
 
         env.storage().persistent().set(&DataKey::Vault(id), &vault);
@@ -213,6 +216,48 @@ impl ScheduleVault {
             
         env.events()
             .publish((symbol_short!("transfer"), vault_id), new_owner);
+    }
+
+    pub fn pause(env: Env, vault_id: u64) {
+        let mut vault: VaultEntry = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Vault(vault_id))
+            .expect("vault not found");
+
+        vault.owner.require_auth();
+        assert!(vault.status == VaultStatus::Active, "vault not active");
+        
+        vault.status = VaultStatus::Paused;
+        vault.paused_at_ledger = Some(env.ledger().sequence());
+        
+        env.storage()
+            .persistent()
+            .set(&DataKey::Vault(vault_id), &vault);
+            
+        env.events()
+            .publish((symbol_short!("paused"), vault_id), vault.owner.clone());
+    }
+
+    pub fn resume(env: Env, vault_id: u64) {
+        let mut vault: VaultEntry = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Vault(vault_id))
+            .expect("vault not found");
+
+        vault.owner.require_auth();
+        assert!(vault.status == VaultStatus::Paused, "vault not paused");
+        
+        vault.status = VaultStatus::Active;
+        vault.paused_at_ledger = None;
+        
+        env.storage()
+            .persistent()
+            .set(&DataKey::Vault(vault_id), &vault);
+            
+        env.events()
+            .publish((symbol_short!("resumed"), vault_id), vault.owner.clone());
     }
 
     pub fn get_vault(env: Env, vault_id: u64) -> Option<VaultEntry> {
