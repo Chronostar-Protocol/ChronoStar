@@ -205,6 +205,10 @@ impl DCAPolicy {
             let output_amount: i128 =
                 env.invoke_contract(&router, &Symbol::new(&env, "swap"), swap_args);
             assert!(
+                output_amount > 0,
+                "swap resulted in zero output"
+            );
+            assert!(
                 output_amount >= dca.min_output_per_swap,
                 "slippage shortfall"
             );
@@ -540,5 +544,124 @@ mod test {
         let dca = dca_client.get_dca(&dca_id).unwrap();
         assert_eq!(dca.executions_completed, 1);
         assert_eq!(dca.last_swap_output, 95_010);
+    }
+
+    #[contract]
+    pub struct MockBreachingRouter;
+
+    #[contractimpl]
+    impl MockBreachingRouter {
+        pub fn swap(
+            env: Env,
+            _from: Address,
+            to: Address,
+            _token_in: Address,
+            token_out: Address,
+            _amount_in: i128,
+            min_amount_out: i128,
+        ) -> i128 {
+            let token_out_admin_client = TokenAdminClient::new(&env, &token_out);
+            let output = min_amount_out - 10; // breach slippage
+            if output > 0 {
+                token_out_admin_client.mint(&to, &output);
+            }
+            output
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "slippage shortfall")]
+    fn test_execute_swap_with_breaching_router() {
+        let (env, contract_id, owner, swap_receiver, token_in) = setup_test();
+        let dca_client = DCAPolicyClient::new(&env, &contract_id);
+
+        let router_id = env.register(MockBreachingRouter, ());
+        let token_out_admin = Address::generate(&env);
+        let token_out = env
+            .register_stellar_asset_contract_v2(token_out_admin.clone())
+            .address();
+
+        let dca_id = dca_client.create_dca_swap(
+            &owner,
+            &token_in,
+            &Some(token_out.clone()),
+            &Some(router_id.clone()),
+            &swap_receiver,
+            &1_000_000,
+            &100_000,
+            &95_000,
+            &1440,
+            &String::from_str(&env, "Router DCA"),
+        );
+
+        env.ledger().set(LedgerInfo {
+            protocol_version: 22,
+            sequence_number: 2440,
+            timestamp: 0,
+            network_id: [0u8; 32],
+            base_reserve: 0,
+            min_persistent_entry_ttl: 1000,
+            min_temp_entry_ttl: 1000,
+            max_entry_ttl: 6_312_000,
+        });
+
+        dca_client.execute_swap(&dca_id);
+    }
+
+    #[contract]
+    pub struct MockZeroRouter;
+
+    #[contractimpl]
+    impl MockZeroRouter {
+        pub fn swap(
+            _env: Env,
+            _from: Address,
+            _to: Address,
+            _token_in: Address,
+            _token_out: Address,
+            _amount_in: i128,
+            _min_amount_out: i128,
+        ) -> i128 {
+            0
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "swap resulted in zero output")]
+    fn test_execute_swap_with_zero_router() {
+        let (env, contract_id, owner, swap_receiver, token_in) = setup_test();
+        let dca_client = DCAPolicyClient::new(&env, &contract_id);
+
+        let router_id = env.register(MockZeroRouter, ());
+        let token_out_admin = Address::generate(&env);
+        let token_out = env
+            .register_stellar_asset_contract_v2(token_out_admin.clone())
+            .address();
+
+        let dca_id = dca_client.create_dca_swap(
+            &owner,
+            &token_in,
+            &Some(token_out.clone()),
+            &Some(router_id.clone()),
+            &swap_receiver,
+            &1_000_000,
+            &100_000,
+            &0, 
+            &1440,
+            &String::from_str(&env, "Router DCA"),
+        );
+
+        env.ledger().set(LedgerInfo {
+            protocol_version: 22,
+            sequence_number: 2440,
+            timestamp: 0,
+            network_id: [0u8; 32],
+            base_reserve: 0,
+            min_persistent_entry_ttl: 1000,
+            min_temp_entry_ttl: 1000,
+            max_entry_ttl: 6_312_000,
+        });
+
+        dca_client.execute_swap(&dca_id);
     }
 }
