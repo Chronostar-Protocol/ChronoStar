@@ -1,5 +1,44 @@
 {
   "contract": "schedule-vault",
   "source": "generated with scripts/generate-contract-specs.sh",
-  "metadata": { "name": "ChronoStar Schedule Vault", "version": "0.1.0" }
+  "metadata": { "name": "ChronoStar Schedule Vault", "version": "0.1.0" },
+  "functions": [
+    {
+      "name": "create_vaults",
+      "description": "Creates N vaults for multi-recipient disbursements, sharing one release ledger and one amount each.",
+      "inputs": [
+        { "name": "recipients", "type": "Vec<Address>" },
+        { "name": "amount", "type": "i128" },
+        { "name": "release_ledger", "type": "u32" },
+        { "name": "label_prefix", "type": "String" }
+      ],
+      "outputs": [
+        { "name": "vault_ids", "type": "Vec<u32>" }
+      ],
+      "constraints": [
+        "recipients.len() <= MAX_BATCH_SIZE",
+        "all vaults share the same release_ledger",
+        "all vaults share the same amount",
+        "index entries written in the same transaction"
+      ]
+    }
+  ],
+  "constants": [
+    { "name": "MAX_BATCH_SIZE", "type": "u32", "description": "Caps the number of recipients per batch to protect the resource budget." }
+  ],
+  "events": [
+    {
+      "name": "BatchVaultsCreated",
+      "fields": [
+        { "name": "count", "type": "u32" },
+        { "name": "release_ledger", "type": "u32" },
+        { "name": "amount", "type": "i128" },
+        { "name": "label_prefix", "type": "String" }
+      ]
+    }
+  ],
+  "notes": [
+    "Entry-count trade-off: a batch of N recipients writes N vault entries + N index entries in one transaction, so the keeper needs a single due-check pass at the shared release_ledger instead of N separate passes.",
+    "MAX_BATCH_SIZE bounds the per-transaction footprint; batches over the cap must be split into multiple calls."
+  ]
 }

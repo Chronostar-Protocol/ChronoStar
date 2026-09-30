@@ -11,6 +11,8 @@ contractmeta!(
     val = "Time-locked Stellar token vaults"
 );
 
+pub const MAX_BATCH_SIZE: u32 = 50;
+
 #[contracttype]
 pub enum DataKey {
     Vault(u64),
@@ -112,6 +114,96 @@ impl ScheduleVault {
         env.storage().instance().extend_ttl(100_000, 100_000);
 
         id
+    }
+
+    pub fn create_vaults(
+        env: Env,
+        owner: Address,
+        recipients: Vec<Address>,
+        token: Address,
+        amount: i128,
+        release_ledger: u32,
+        label_prefix: String,
+    ) -> Vec<u64> {
+        owner.require_auth();
+        assert!(amount > 0, "amount must be positive");
+        assert!(
+            release_ledger > env.ledger().sequence(),
+            "release_ledger must be in the future"
+        );
+        assert!(label_prefix.len() <= 64, "label max 64 chars");
+
+        let count = recipients.len();
+        assert!(count > 0, "batch must not be empty");
+        assert!(count <= MAX_BATCH_SIZE, "batch exceeds MAX_BATCH_SIZE");
+
+        let total: i128 = amount
+            .checked_mul(count as i128)
+            .expect("batch amount overflow");
+
+        let token_client = token::Client::new(&env, &token);
+        token_client.transfer_from(
+            &env.current_contract_address(),
+            &owner,
+            &env.current_contract_address(),
+            &total,
+        );
+
+        let mut next_id: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::Counter)
+            .unwrap_or(0u64);
+
+        let mut owner_vaults: Vec<u64> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::VaultsByOwner(owner.clone()))
+            .unwrap_or(Vec::new(&env));
+
+        let created_ledger = env.ledger().sequence();
+        let mut ids: Vec<u64> = Vec::new(&env);
+
+        for recipient in recipients.iter() {
+            next_id += 1;
+            let id = next_id;
+
+            let vault = VaultEntry {
+                id,
+                owner: owner.clone(),
+                recipient,
+                token: token.clone(),
+                amount,
+                release_ledger,
+                created_ledger,
+                label: label_prefix.clone(),
+                status: VaultStatus::Active,
+            };
+
+            env.storage().persistent().set(&DataKey::Vault(id), &vault);
+            env.storage()
+                .persistent()
+                .extend_ttl(&DataKey::Vault(id), 6_312_000, 6_312_000);
+
+            owner_vaults.push_back(id);
+            ids.push_back(id);
+        }
+
+        env.storage().instance().set(&DataKey::Counter, &next_id);
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::VaultsByOwner(owner.clone()), &owner_vaults);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::VaultsByOwner(owner), 6_312_000, 6_312_000);
+
+        env.storage().instance().extend_ttl(100_000, 100_000);
+
+        env.events()
+            .publish((symbol_short!("batch"), created_ledger), ids.clone());
+
+        ids
     }
 
     pub fn release(env: Env, vault_id: u64) {
@@ -387,5 +479,94 @@ mod test {
 
         let vaults = vault_client.get_vaults_by_owner(&owner);
         assert_eq!(vaults.len(), 3);
+    }
+
+    #[test]
+    fn test_create_vaults_batch_of_three() {
+        let (env, contract_id, owner, _recipient, token) = setup_test();
+        let vault_client = ScheduleVaultClient::new(&env, &contract_id);
+
+        let r1 = Address::generate(&env);
+        let r2 = Address::generate(&env);
+        let r3 = Address::generate(&env);
+        let mut recipients = Vec::new(&env);
+        recipients.push_back(r1.clone());
+        recipients.push_back(r2.clone());
+        recipients.push_back(r3.clone());
+
+        let ids = vault_client.create_vaults(
+            &owner,
+            &recipients,
+            &token,
+            &1_000_000,
+            &2000,
+            &String::from_str(&env, "Payroll"),
+        );
+
+        assert_eq!(ids.len(), 3);
+        assert_eq!(ids.get(0).unwrap(), 1);
+        assert_eq!(ids.get(1).unwrap(), 2);
+        assert_eq!(ids.get(2).unwrap(), 3);
+
+        let v1 = vault_client.get_vault(&1).unwrap();
+        let v2 = vault_client.get_vault(&2).unwrap();
+        let v3 = vault_client.get_vault(&3).unwrap();
+
+        assert_eq!(v1.recipient, r1);
+        assert_eq!(v2.recipient, r2);
+        assert_eq!(v3.recipient, r3);
+        assert_eq!(v1.release_ledger, 2000);
+        assert_eq!(v2.release_ledger, 2000);
+        assert_eq!(v3.release_ledger, 2000);
+        assert_eq!(v1.amount, 1_000_000);
+        assert_eq!(v2.amount, 1_000_000);
+        assert_eq!(v3.amount, 1_000_000);
+
+        let owned = vault_client.get_vaults_by_owner(&owner);
+        assert_eq!(owned.len(), 3);
+        assert_eq!(vault_client.vault_count(), 3);
+    }
+
+    #[test]
+    fn test_create_vaults_empty_batch() {
+        let (env, contract_id, owner, _recipient, token) = setup_test();
+        let vault_client = ScheduleVaultClient::new(&env, &contract_id);
+
+        let recipients: Vec<Address> = Vec::new(&env);
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            vault_client.create_vaults(
+                &owner,
+                &recipients,
+                &token,
+                &1_000_000,
+                &2000,
+                &String::from_str(&env, "Payroll"),
+            );
+        }));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_create_vaults_over_cap() {
+        let (env, contract_id, owner, _recipient, token) = setup_test();
+        let vault_client = ScheduleVaultClient::new(&env, &contract_id);
+
+        let mut recipients: Vec<Address> = Vec::new(&env);
+        for _ in 0..(MAX_BATCH_SIZE + 1) {
+            recipients.push_back(Address::generate(&env));
+        }
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            vault_client.create_vaults(
+                &owner,
+                &recipients,
+                &token,
+                &1_000_000,
+                &2000,
+                &String::from_str(&env, "Payroll"),
+            );
+        }));
+        assert!(result.is_err());
     }
 }
