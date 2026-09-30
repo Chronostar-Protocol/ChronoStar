@@ -20,7 +20,7 @@ async function main() {
     w.start(config.pollIntervalMs);
   }
 
-  const server = createServer(watchers);
+  const server = createServer(watchers, client);
 
   function shutdown() {
     logger.info('shutting down');
