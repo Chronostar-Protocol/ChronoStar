@@ -1,0 +1,13 @@
+# Contract changes need review from a contract maintainer.
+/contract/dca-policy/ @anumukul
+/contract/recurring-stream/ @anumukul
+/contract/schedule-vault/ @anumukul
+
+# Service and product area owners.
+/keeper/ @anumukul
+/backend/ @anumukul
+/frontend/ @anumukul
+/docs/ @anumukul
+
+# Workflow changes need review from a CI maintainer.
+/.github/workflows/ @anumukul
