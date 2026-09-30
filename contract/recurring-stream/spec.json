@@ -1,5 +1,81 @@
 {
   "contract": "recurring-stream",
   "source": "generated with scripts/generate-contract-specs.sh",
-  "metadata": { "name": "ChronoStar Recurring Stream", "version": "0.1.0" }
+  "metadata": { "name": "ChronoStar Recurring Stream", "version": "0.1.0" },
+  "functions": [
+    {
+      "name": "create_stream",
+      "description": "Create a recurring stream. An optional start_delay_ledgers adds a cliff period before accrual begins.",
+      "params": [
+        { "name": "sender", "type": "Address" },
+        {
+          "name": "recipient",
+          "type": "Address"
+        },
+        { "name": "token", "type": "Address" },
+        { "name": "amount", "type": "i128" },
+        {
+          "name": "end_ledger",
+          "type": "u32",
+          "description": "Absolute ledger at which the stream finishes accruing."
+        },
+        {
+          "name": "start_delay_ledgers",
+          "type": "u32",
+          "optional": true,
+          "default": 0,
+          "description": "Number of ledgers after the current ledger before accrual begins. Stored as start_ledger = current + offset. A zero delay reproduces the original behaviour."
+        }
+      ],
+      "returns": { "type": "u32", "description": "Stream id." },
+      "errors": [
+        { "name": "InvalidDuration", "description": "end_ledger must be greater than start_ledger." },
+        { "name": "InvalidAmount", "description": "amount must be positive." }
+      ],
+      "acceptance": [
+        "A zero delay reproduces current behaviour exactly",
+        "Total duration calculation still uses end_ledger - start_ledger so the drip rate is unchanged"
+      ]
+    },
+    {
+      "name": "claimable_amount",
+      "description": "Returns the amount currently claimable by the recipient. Returns 0 before start_ledger.",
+      "params": [{ "name": "stream_id", "type": "u32" }],
+      "returns": { "type": "i128" }
+    },
+    {
+      "name": "claim",
+      "description": "Claim accrued funds. Fails with CliffNotReached if called before start_ledger.",
+      "params": [{ "name": "stream_id", "type": "u32" }],
+      "returns": { "type": "i128" },
+      "errors": [
+        {
+          "name": "CliffNotReached",
+          "description": "Claiming before the cliff (start_ledger) fails with a clear error rather than 'nothing to claim'."
+        }
+      ],
+      "acceptance": [
+        "Claiming before the cliff fails with a clear error, not 'nothing to claim'",
+        "Tests for pre-cliff claim rejection and a post-cliff partial claim"
+      ]
+    }
+  ],
+  "storage": [
+    {
+      "name": "Stream",
+      "fields": [
+        { "name": "sender", "type": "Address" },
+        { "name": "recipient", "type": "Address" },
+        { "name": "token", "type": "Address" },
+        { "name": "amount", "type": "i128" },
+        {
+          "name": "start_ledger",
+          "type": "u32",
+          "description": "current_ledger + start_delay_ledgers at creation time."
+        },
+        { "name": "end_ledger", "type": "u32" },
+        { "name": "claimed", "type": "i128" }
+      ]
+    }
+  ]
 }
