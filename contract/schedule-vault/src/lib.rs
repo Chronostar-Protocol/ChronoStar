@@ -16,6 +16,7 @@ pub enum DataKey {
     Vault(u64),
     Counter,
     VaultsByOwner(Address),
+    VaultsByRecipient(Address),
 }
 
 #[contracttype]
@@ -30,6 +31,8 @@ pub struct VaultEntry {
     pub created_ledger: u32,
     pub label: String,
     pub status: VaultStatus,
+    pub paused_at_ledger: Option<u32>,
+    pub expires_after_ledger: Option<u32>,
 }
 
 #[contracttype]
@@ -38,6 +41,8 @@ pub enum VaultStatus {
     Active,
     Released,
     Cancelled,
+    Paused,
+    Reclaimed,
 }
 
 #[contract]
@@ -53,6 +58,7 @@ impl ScheduleVault {
         amount: i128,
         release_ledger: u32,
         label: String,
+        expires_after_ledger: Option<u32>,
     ) -> u64 {
         owner.require_auth();
         assert!(amount > 0, "amount must be positive");
@@ -61,6 +67,9 @@ impl ScheduleVault {
             "release_ledger must be in the future"
         );
         assert!(label.len() <= 64, "label max 64 chars");
+        if let Some(expiry) = expires_after_ledger {
+            assert!(expiry > release_ledger, "expiry must be strictly greater than release_ledger");
+        }
 
         let token_client = token::Client::new(&env, &token);
         token_client.transfer_from(
@@ -88,6 +97,8 @@ impl ScheduleVault {
             created_ledger: env.ledger().sequence(),
             label,
             status: VaultStatus::Active,
+            paused_at_ledger: None,
+            expires_after_ledger,
         };
 
         env.storage().persistent().set(&DataKey::Vault(id), &vault);
@@ -108,6 +119,19 @@ impl ScheduleVault {
         env.storage()
             .persistent()
             .extend_ttl(&DataKey::VaultsByOwner(owner), 6_312_000, 6_312_000);
+
+        let mut recipient_vaults: Vec<u64> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::VaultsByRecipient(recipient.clone()))
+            .unwrap_or(Vec::new(&env));
+        recipient_vaults.push_back(id);
+        env.storage()
+            .persistent()
+            .set(&DataKey::VaultsByRecipient(recipient.clone()), &recipient_vaults);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::VaultsByRecipient(recipient), 6_312_000, 6_312_000);
 
         env.storage().instance().extend_ttl(100_000, 100_000);
 
@@ -174,6 +198,115 @@ impl ScheduleVault {
             .publish((symbol_short!("cancelled"), vault_id), vault.owner.clone());
     }
 
+    pub fn transfer_ownership(env: Env, vault_id: u64, new_owner: Address) {
+        let mut vault: VaultEntry = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Vault(vault_id))
+            .expect("vault not found");
+
+        vault.owner.require_auth();
+        assert!(vault.status == VaultStatus::Active, "vault not active");
+
+        let mut old_owner_vaults: Vec<u64> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::VaultsByOwner(vault.owner.clone()))
+            .unwrap_or(Vec::new(&env));
+        if let Some(index) = old_owner_vaults.first_index_of(&vault_id) {
+            old_owner_vaults.remove(index);
+            env.storage()
+                .persistent()
+                .set(&DataKey::VaultsByOwner(vault.owner.clone()), &old_owner_vaults);
+        }
+
+        vault.owner = new_owner.clone();
+        env.storage()
+            .persistent()
+            .set(&DataKey::Vault(vault_id), &vault);
+
+        let mut new_owner_vaults: Vec<u64> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::VaultsByOwner(new_owner.clone()))
+            .unwrap_or(Vec::new(&env));
+        new_owner_vaults.push_back(vault_id);
+        env.storage()
+            .persistent()
+            .set(&DataKey::VaultsByOwner(new_owner.clone()), &new_owner_vaults);
+            
+        env.events()
+            .publish((symbol_short!("transfer"), vault_id), new_owner);
+    }
+
+    pub fn pause(env: Env, vault_id: u64) {
+        let mut vault: VaultEntry = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Vault(vault_id))
+            .expect("vault not found");
+
+        vault.owner.require_auth();
+        assert!(vault.status == VaultStatus::Active, "vault not active");
+        
+        vault.status = VaultStatus::Paused;
+        vault.paused_at_ledger = Some(env.ledger().sequence());
+        
+        env.storage()
+            .persistent()
+            .set(&DataKey::Vault(vault_id), &vault);
+            
+        env.events()
+            .publish((symbol_short!("paused"), vault_id), vault.owner.clone());
+    }
+
+    pub fn resume(env: Env, vault_id: u64) {
+        let mut vault: VaultEntry = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Vault(vault_id))
+            .expect("vault not found");
+
+        vault.owner.require_auth();
+        assert!(vault.status == VaultStatus::Paused, "vault not paused");
+        
+        vault.status = VaultStatus::Active;
+        vault.paused_at_ledger = None;
+        
+        env.storage()
+            .persistent()
+            .set(&DataKey::Vault(vault_id), &vault);
+            
+        env.events()
+            .publish((symbol_short!("resumed"), vault_id), vault.owner.clone());
+    }
+
+    pub fn reclaim(env: Env, vault_id: u64) {
+        let mut vault: VaultEntry = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Vault(vault_id))
+            .expect("vault not found");
+
+        vault.owner.require_auth();
+        assert!(vault.status == VaultStatus::Active, "vault not active");
+        
+        let current_ledger = env.ledger().sequence();
+        let expiry = vault.expires_after_ledger.expect("vault has no expiry");
+        assert!(current_ledger > expiry, "vault not yet expired");
+
+        vault.status = VaultStatus::Reclaimed;
+        env.storage()
+            .persistent()
+            .set(&DataKey::Vault(vault_id), &vault);
+
+        let token_client = token::Client::new(&env, &vault.token);
+        token_client.transfer(&env.current_contract_address(), &vault.owner, &vault.amount);
+        
+        env.events()
+            .publish((symbol_short!("reclaimed"), vault_id), vault.owner.clone());
+    }
+
     pub fn get_vault(env: Env, vault_id: u64) -> Option<VaultEntry> {
         env.storage().persistent().get(&DataKey::Vault(vault_id))
     }
@@ -182,6 +315,13 @@ impl ScheduleVault {
         env.storage()
             .persistent()
             .get(&DataKey::VaultsByOwner(owner))
+            .unwrap_or(Vec::new(&env))
+    }
+
+    pub fn get_vaults_by_recipient(env: Env, recipient: Address) -> Vec<u64> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::VaultsByRecipient(recipient))
             .unwrap_or(Vec::new(&env))
     }
 
@@ -255,6 +395,7 @@ mod test {
             &1_000_000,
             &2000,
             &String::from_str(&env, "Test vault"),
+            &None,
         );
 
         assert_eq!(vault_id, 1);
@@ -279,6 +420,7 @@ mod test {
             &1_000_000,
             &2000,
             &String::from_str(&env, "Test vault"),
+            &None,
         );
 
         env.ledger().set(LedgerInfo {
@@ -310,6 +452,7 @@ mod test {
             &1_000_000,
             &2000,
             &String::from_str(&env, "Test vault"),
+            &None,
         );
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -330,6 +473,7 @@ mod test {
             &1_000_000,
             &2000,
             &String::from_str(&env, "Test vault"),
+            &None,
         );
 
         vault_client.cancel(&vault_id);
@@ -350,6 +494,7 @@ mod test {
             &1_000_000,
             &2000,
             &String::from_str(&env, "Test vault"),
+            &None,
         );
 
         env.ledger().set(LedgerInfo {
@@ -370,7 +515,7 @@ mod test {
     }
 
     #[test]
-    fn test_get_vaults_by_owner() {
+    fn test_get_vaults_by_owner_and_recipient() {
         let (env, contract_id, owner, recipient, token) = setup_test();
         let vault_client = ScheduleVaultClient::new(&env, &contract_id);
 
@@ -382,10 +527,79 @@ mod test {
                 &1_000_000,
                 &(2000 + i * 100),
                 &String::from_str(&env, "Vault"),
+                &None,
             );
         }
 
         let vaults = vault_client.get_vaults_by_owner(&owner);
         assert_eq!(vaults.len(), 3);
+
+        let recipient_vaults = vault_client.get_vaults_by_recipient(&recipient);
+        assert_eq!(recipient_vaults.len(), 3);
+        assert_eq!(vaults, recipient_vaults);
+    }
+
+    #[test]
+    fn test_reclaim_before_expiry() {
+        let (env, contract_id, owner, recipient, token) = setup_test();
+        let vault_client = ScheduleVaultClient::new(&env, &contract_id);
+
+        let vault_id = vault_client.create_vault(
+            &owner,
+            &recipient,
+            &token,
+            &1_000_000,
+            &2000,
+            &String::from_str(&env, "Test vault"),
+            &Some(3000),
+        );
+
+        env.ledger().set(LedgerInfo {
+            protocol_version: 22,
+            sequence_number: 2500,
+            timestamp: 0,
+            network_id: [0u8; 32],
+            base_reserve: 0,
+            min_persistent_entry_ttl: 1000,
+            min_temp_entry_ttl: 1000,
+            max_entry_ttl: 6_312_000,
+        });
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            vault_client.reclaim(&vault_id);
+        }));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_reclaim_after_expiry() {
+        let (env, contract_id, owner, recipient, token) = setup_test();
+        let vault_client = ScheduleVaultClient::new(&env, &contract_id);
+
+        let vault_id = vault_client.create_vault(
+            &owner,
+            &recipient,
+            &token,
+            &1_000_000,
+            &2000,
+            &String::from_str(&env, "Test vault"),
+            &Some(3000),
+        );
+
+        env.ledger().set(LedgerInfo {
+            protocol_version: 22,
+            sequence_number: 3001,
+            timestamp: 0,
+            network_id: [0u8; 32],
+            base_reserve: 0,
+            min_persistent_entry_ttl: 1000,
+            min_temp_entry_ttl: 1000,
+            max_entry_ttl: 6_312_000,
+        });
+
+        vault_client.reclaim(&vault_id);
+
+        let vault = vault_client.get_vault(&vault_id).unwrap();
+        assert_eq!(vault.status, VaultStatus::Reclaimed);
     }
 }
