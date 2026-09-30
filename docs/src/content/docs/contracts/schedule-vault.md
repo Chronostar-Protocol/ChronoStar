@@ -50,6 +50,25 @@ fn cancel(env: Env, vault_id: u64)
 
 Cancels the vault and returns tokens to the owner. Only callable before `release_ledger`. Requires owner auth.
 
+### `transfer_ownership`
+
+```rust
+fn transfer_ownership(env: Env, vault_id: u64, new_owner: Address)
+```
+
+Transfers control of the vault to `new_owner`. The recipient remains unchanged. The new owner becomes the funder, gaining the ability to cancel the vault and claim the tokens, or transfer ownership again. The old owner loses these rights immediately.
+
+- Requires current owner auth
+- Only allowed on `Active` vaults
+
+## Owner vs Recipient
+
+```mermaid
+flowchart LR
+    Owner[Owner (Funder)] -- "Funds vault\nCan cancel/transfer" --> Vault
+    Vault -- "Releases funds" --> Recipient[Recipient (Payee)]
+```
+
 ### `get_vault`
 
 ```rust

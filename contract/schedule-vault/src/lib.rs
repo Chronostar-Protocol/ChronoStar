@@ -174,6 +174,47 @@ impl ScheduleVault {
             .publish((symbol_short!("cancelled"), vault_id), vault.owner.clone());
     }
 
+    pub fn transfer_ownership(env: Env, vault_id: u64, new_owner: Address) {
+        let mut vault: VaultEntry = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Vault(vault_id))
+            .expect("vault not found");
+
+        vault.owner.require_auth();
+        assert!(vault.status == VaultStatus::Active, "vault not active");
+
+        let mut old_owner_vaults: Vec<u64> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::VaultsByOwner(vault.owner.clone()))
+            .unwrap_or(Vec::new(&env));
+        if let Some(index) = old_owner_vaults.first_index_of(&vault_id) {
+            old_owner_vaults.remove(index);
+            env.storage()
+                .persistent()
+                .set(&DataKey::VaultsByOwner(vault.owner.clone()), &old_owner_vaults);
+        }
+
+        vault.owner = new_owner.clone();
+        env.storage()
+            .persistent()
+            .set(&DataKey::Vault(vault_id), &vault);
+
+        let mut new_owner_vaults: Vec<u64> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::VaultsByOwner(new_owner.clone()))
+            .unwrap_or(Vec::new(&env));
+        new_owner_vaults.push_back(vault_id);
+        env.storage()
+            .persistent()
+            .set(&DataKey::VaultsByOwner(new_owner.clone()), &new_owner_vaults);
+            
+        env.events()
+            .publish((symbol_short!("transfer"), vault_id), new_owner);
+    }
+
     pub fn get_vault(env: Env, vault_id: u64) -> Option<VaultEntry> {
         env.storage().persistent().get(&DataKey::Vault(vault_id))
     }
