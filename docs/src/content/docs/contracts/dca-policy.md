@@ -69,6 +69,14 @@ fn get_dca(env: Env, dca_id: u64) -> Option<DCAEntry>
 | `Exhausted` | All swaps executed, budget fully spent |
 | `Cancelled` | Cancelled by owner, remaining budget returned |
 
+## Events
+
+Every event uses two topics: the event name and the DCA ID.
+
+- `created` — published by `create_dca` and `create_dca_swap`. Data is `DCACreated { owner, next_execution_ledger }`.
+- `swap` — published by `execute_swap`. Data is the running execution count.
+- `cancelled` — published by `cancel`. Data is the owner address.
+
 ## Testing
 
 ```bash
@@ -76,4 +84,4 @@ cd contract
 cargo test -p dca-policy
 ```
 
-All 5 tests must pass.
+All 6 tests must pass.

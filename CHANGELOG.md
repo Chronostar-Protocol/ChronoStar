@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `created` events published by `create_vault`, `create_stream`, and `create_dca`/`create_dca_swap`, carrying the new ID in topic two and a typed payload with the owner and key schedule ledger
 - ESLint config and lint script for keeper bot
 - `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `LICENSE`, `ROADMAP.md` community health files
 - CI lint jobs (`cargo fmt`, `cargo clippy`, ESLint) added to test workflows
@@ -15,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Multi-asset DCA design & scoping document (`docs/.../contracts/dca-multi-asset.md`)
 
 ### Fixed
+- `cargo fmt --check` violations in the `dca-policy` import list and a stray blank-line run in `recurring-stream`, which were failing the `Test Contracts` lint job
 - CI branch triggers changed from `main` to `master` to match default branch
 
 ## [0.1.0] — 2026-07-14

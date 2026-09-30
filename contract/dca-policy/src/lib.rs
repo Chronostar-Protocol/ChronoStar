@@ -1,6 +1,7 @@
 #![no_std]
 use soroban_sdk::{
-    contract, contractimpl, contractmeta, contracttype, symbol_short, token, Address, Env, IntoVal, String, Symbol, Val, Vec,
+    contract, contractimpl, contractmeta, contracttype, symbol_short, token, Address, Env, IntoVal,
+    String, Symbol, Val, Vec,
 };
 
 contractmeta!(key = "name", val = "ChronoStar DCA Policy");
@@ -47,6 +48,13 @@ pub enum DCAStatus {
     Active,
     Exhausted,
     Cancelled,
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub struct DCACreated {
+    pub owner: Address,
+    pub next_execution_ledger: u32,
 }
 
 #[contract]
@@ -162,6 +170,14 @@ impl DCAPolicy {
             .extend_ttl(&DataKey::DCAsByOwner(owner), 6_312_000, 6_312_000);
 
         env.storage().instance().extend_ttl(100_000, 100_000);
+
+        env.events().publish(
+            (symbol_short!("created"), id),
+            DCACreated {
+                owner: dca.owner.clone(),
+                next_execution_ledger: dca.next_execution_ledger,
+            },
+        );
 
         id
     }
@@ -289,9 +305,9 @@ extern crate std;
 mod test {
     use super::*;
     use soroban_sdk::{
-        testutils::{Address as _, Ledger, LedgerInfo},
+        testutils::{Address as _, Events as _, Ledger, LedgerInfo},
         token::{StellarAssetClient as TokenAdminClient, TokenClient},
-        Env,
+        Env, TryFromVal,
     };
 
     fn setup_test() -> (Env, Address, Address, Address, Address) {
@@ -353,6 +369,39 @@ mod test {
         assert_eq!(dca.total_budget, 1_000_000);
         assert_eq!(dca.amount_per_swap, 100_000);
         assert_eq!(dca.status, DCAStatus::Active);
+    }
+
+    #[test]
+    fn test_create_dca_emits_created_event() {
+        let (env, contract_id, owner, swap_receiver, token) = setup_test();
+        let dca_client = DCAPolicyClient::new(&env, &contract_id);
+
+        let dca_id = dca_client.create_dca(
+            &owner,
+            &token,
+            &swap_receiver,
+            &1_000_000,
+            &100_000,
+            &1440,
+            &String::from_str(&env, "Test DCA"),
+        );
+
+        let events = env.events().all();
+        let (_, topics, data) = events
+            .iter()
+            .find(|(_, topics, _)| {
+                Symbol::try_from_val(&env, &topics.get(0).unwrap())
+                    .map_or(false, |name| name == symbol_short!("created"))
+            })
+            .expect("created event not published");
+
+        assert_eq!(topics.len(), 2);
+        let event_id = u64::try_from_val(&env, &topics.get(1).unwrap()).unwrap();
+        assert_eq!(event_id, dca_id);
+
+        let created = DCACreated::try_from_val(&env, data).unwrap();
+        assert_eq!(created.owner, owner);
+        assert_eq!(created.next_execution_ledger, 2440);
     }
 
     #[test]
