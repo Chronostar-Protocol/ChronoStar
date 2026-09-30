@@ -266,6 +266,41 @@ impl DCAPolicy {
             .publish((symbol_short!("cancelled"), dca_id), dca.owner.clone());
     }
 
+    pub fn top_up(env: Env, dca_id: u64, amount: i128) {
+        let mut dca: DCAEntry = env
+            .storage()
+            .persistent()
+            .get(&DataKey::DCA(dca_id))
+            .expect("DCA not found");
+
+        dca.owner.require_auth();
+        assert!(amount > 0, "amount must be positive");
+        assert!(dca.status != DCAStatus::Cancelled, "cannot top-up cancelled policy");
+
+        let token_client = token::Client::new(&env, &dca.token_in);
+        token_client.transfer_from(
+            &env.current_contract_address(),
+            &dca.owner,
+            &env.current_contract_address(),
+            &amount,
+        );
+
+        dca.total_budget += amount;
+        dca.remaining_budget += amount;
+
+        if dca.status == DCAStatus::Exhausted {
+            dca.status = DCAStatus::Active;
+            dca.next_execution_ledger = env.ledger().sequence() + dca.interval_ledgers;
+        }
+
+        env.storage().persistent().set(&DataKey::DCA(dca_id), &dca);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::DCA(dca_id), 6_312_000, 6_312_000);
+        env.events()
+            .publish((symbol_short!("topup"), dca_id), amount);
+    }
+
     pub fn get_dca(env: Env, dca_id: u64) -> Option<DCAEntry> {
         env.storage().persistent().get(&DataKey::DCA(dca_id))
     }
@@ -480,6 +515,104 @@ mod test {
         let dca = dca_client.get_dca(&dca_id).unwrap();
         assert_eq!(dca.status, DCAStatus::Cancelled);
         assert_eq!(dca.remaining_budget, 0);
+    }
+
+    #[test]
+    fn test_top_up_active() {
+        let (env, contract_id, owner, swap_receiver, token) = setup_test();
+        let dca_client = DCAPolicyClient::new(&env, &contract_id);
+
+        let dca_id = dca_client.create_dca(
+            &owner,
+            &token,
+            &swap_receiver,
+            &1_000_000,
+            &100_000,
+            &1440,
+            &String::from_str(&env, "Test DCA"),
+        );
+
+        dca_client.top_up(&dca_id, &500_000);
+
+        let dca = dca_client.get_dca(&dca_id).unwrap();
+        assert_eq!(dca.total_budget, 1_500_000);
+        assert_eq!(dca.remaining_budget, 1_500_000);
+        assert_eq!(dca.status, DCAStatus::Active);
+    }
+
+    #[test]
+    fn test_top_up_exhausted() {
+        let (env, contract_id, owner, swap_receiver, token) = setup_test();
+        let dca_client = DCAPolicyClient::new(&env, &contract_id);
+
+        let dca_id = dca_client.create_dca(
+            &owner,
+            &token,
+            &swap_receiver,
+            &500_000,
+            &100_000,
+            &120,
+            &String::from_str(&env, "Test DCA"),
+        );
+
+        for i in 0..5 {
+            env.ledger().set(LedgerInfo {
+                protocol_version: 22,
+                sequence_number: 1000 + (i * 120) + 120,
+                timestamp: 0,
+                network_id: [0u8; 32],
+                base_reserve: 0,
+                min_persistent_entry_ttl: 1000,
+                min_temp_entry_ttl: 1000,
+                max_entry_ttl: 6_312_000,
+            });
+            dca_client.execute_swap(&dca_id);
+        }
+
+        let dca = dca_client.get_dca(&dca_id).unwrap();
+        assert_eq!(dca.status, DCAStatus::Exhausted);
+
+        env.ledger().set(LedgerInfo {
+            protocol_version: 22,
+            sequence_number: 2000,
+            timestamp: 0,
+            network_id: [0u8; 32],
+            base_reserve: 0,
+            min_persistent_entry_ttl: 1000,
+            min_temp_entry_ttl: 1000,
+            max_entry_ttl: 6_312_000,
+        });
+
+        dca_client.top_up(&dca_id, &500_000);
+
+        let dca2 = dca_client.get_dca(&dca_id).unwrap();
+        assert_eq!(dca2.status, DCAStatus::Active);
+        assert_eq!(dca2.total_budget, 1_000_000);
+        assert_eq!(dca2.remaining_budget, 500_000);
+        assert_eq!(dca2.next_execution_ledger, 2000 + 120);
+    }
+
+    #[test]
+    fn test_top_up_cancelled_fails() {
+        let (env, contract_id, owner, swap_receiver, token) = setup_test();
+        let dca_client = DCAPolicyClient::new(&env, &contract_id);
+
+        let dca_id = dca_client.create_dca(
+            &owner,
+            &token,
+            &swap_receiver,
+            &1_000_000,
+            &100_000,
+            &1440,
+            &String::from_str(&env, "Test DCA"),
+        );
+
+        dca_client.cancel(&dca_id);
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            dca_client.top_up(&dca_id, &500_000);
+        }));
+        assert!(result.is_err());
     }
 
     #[contract]
