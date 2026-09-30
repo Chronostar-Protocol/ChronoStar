@@ -41,10 +41,26 @@ Creates a new stream. Transfers `total_amount` from owner to the contract.
 - Minimum duration: 60 ledgers (~5 minutes)
 - `total_amount` must be positive
 
+### `create_split_stream`
+
+```rust
+fn create_split_stream(
+    env: Env,
+    owner: Address,
+    splits: Vec<StreamSplit>, // { recipient: Address, share: u16 }
+    token: Address,
+    total_amount: i128,
+    duration_ledgers: u32,
+    label: String,
+) -> u64
+```
+
+Creates a new stream with multiple recipients. `share` is in basis points and total shares must equal exactly 10 000. Rounding dust is automatically distributed to the last recipient on each claim.
+
 ### `claim`
 
 ```rust
-fn claim(env: Env, stream_id: u64) -> i128
+fn claim(env: Env, caller: Address, stream_id: u64) -> i128
 ```
 
 Claims the currently vested amount for the recipient. Returns the amount claimed.

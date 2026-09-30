@@ -17,6 +17,14 @@ pub enum DataKey {
     Counter,
     StreamsByOwner(Address),
     StreamsByRecipient(Address),
+    StreamSplits(u64),
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub struct StreamSplit {
+    pub recipient: Address,
+    pub share: u16,
 }
 
 #[contracttype]
@@ -160,14 +168,140 @@ impl RecurringStream {
         id
     }
 
-    pub fn claim(env: Env, stream_id: u64) -> i128 {
+    pub fn create_split_stream(
+        env: Env,
+        owner: Address,
+        splits: Vec<StreamSplit>,
+        token: Address,
+        total_amount: i128,
+        duration_ledgers: u32,
+        label: String,
+    ) -> u64 {
+        owner.require_auth();
+        assert!(total_amount > 0, "amount must be positive");
+        assert!(
+            duration_ledgers >= 60,
+            "minimum duration is 60 ledgers (~5 min)"
+        );
+        assert!(splits.len() > 1, "use create_stream for single recipient");
+
+        let mut total_share: u16 = 0;
+        for split in splits.iter() {
+            total_share += split.share;
+        }
+        assert!(total_share == 10000, "shares must sum to 10000");
+
+        let token_client = token::Client::new(&env, &token);
+        token_client.transfer_from(
+            &env.current_contract_address(),
+            &owner,
+            &env.current_contract_address(),
+            &total_amount,
+        );
+
+        let id: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::Counter)
+            .unwrap_or(0u64)
+            + 1;
+        env.storage().instance().set(&DataKey::Counter, &id);
+
+        let current = env.ledger().sequence();
+        let stream = StreamEntry {
+            id,
+            owner: owner.clone(),
+            recipient: env.current_contract_address(),
+            token,
+            total_amount,
+            claimed_amount: 0,
+            start_ledger: current,
+            end_ledger: current + duration_ledgers,
+            last_claimed_ledger: current,
+            created_ledger: current,
+            label,
+            status: StreamStatus::Active,
+        };
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::Stream(id), &stream);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::Stream(id), 6_312_000, 6_312_000);
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::StreamSplits(id), &splits);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::StreamSplits(id), 6_312_000, 6_312_000);
+
+        let mut owner_streams: Vec<u64> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::StreamsByOwner(owner.clone()))
+            .unwrap_or(Vec::new(&env));
+        owner_streams.push_back(id);
+        env.storage()
+            .persistent()
+            .set(&DataKey::StreamsByOwner(owner.clone()), &owner_streams);
+        env.storage().persistent().extend_ttl(
+            &DataKey::StreamsByOwner(owner),
+            6_312_000,
+            6_312_000,
+        );
+
+        for split in splits.iter() {
+            let mut rec_streams: Vec<u64> = env
+                .storage()
+                .persistent()
+                .get(&DataKey::StreamsByRecipient(split.recipient.clone()))
+                .unwrap_or(Vec::new(&env));
+            rec_streams.push_back(id);
+            env.storage().persistent().set(
+                &DataKey::StreamsByRecipient(split.recipient.clone()),
+                &rec_streams,
+            );
+            env.storage().persistent().extend_ttl(
+                &DataKey::StreamsByRecipient(split.recipient.clone()),
+                6_312_000,
+                6_312_000,
+            );
+        }
+
+        env.storage().instance().extend_ttl(100_000, 100_000);
+
+        id
+    }
+
+    pub fn claim(env: Env, caller: Address, stream_id: u64) -> i128 {
         let mut stream: StreamEntry = env
             .storage()
             .persistent()
             .get(&DataKey::Stream(stream_id))
             .expect("stream not found");
 
-        stream.recipient.require_auth();
+        caller.require_auth();
+
+        let splits_opt: Option<Vec<StreamSplit>> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::StreamSplits(stream_id));
+
+        if let Some(splits) = &splits_opt {
+            let mut found = false;
+            for split in splits.iter() {
+                if split.recipient == caller {
+                    found = true;
+                    break;
+                }
+            }
+            assert!(found, "caller not in splits");
+        } else {
+            assert!(caller == stream.recipient, "caller not recipient");
+        }
+
         assert!(stream.status == StreamStatus::Active, "stream not active");
 
         let current = env.ledger().sequence();
@@ -189,11 +323,34 @@ impl RecurringStream {
             .extend_ttl(&DataKey::Stream(stream_id), 6_312_000, 6_312_000);
 
         let token_client = token::Client::new(&env, &stream.token);
-        token_client.transfer(
-            &env.current_contract_address(),
-            &stream.recipient,
-            &claimable,
-        );
+
+        if let Some(splits) = splits_opt {
+            let mut remaining = claimable;
+            let len = splits.len();
+            for i in 0..len {
+                let split = splits.get(i).unwrap();
+                let amount = if i == len - 1 {
+                    remaining
+                } else {
+                    let share_amount = (claimable * (split.share as i128)) / 10000;
+                    remaining -= share_amount;
+                    share_amount
+                };
+                if amount > 0 {
+                    token_client.transfer(
+                        &env.current_contract_address(),
+                        &split.recipient,
+                        &amount,
+                    );
+                }
+            }
+        } else {
+            token_client.transfer(
+                &env.current_contract_address(),
+                &stream.recipient,
+                &claimable,
+            );
+        }
 
         env.events()
             .publish((symbol_short!("claimed"), stream_id), claimable);
@@ -253,11 +410,39 @@ impl RecurringStream {
 
         if claimable > 0 {
             stream.claimed_amount += claimable;
-            token_client.transfer(
-                &env.current_contract_address(),
-                &stream.recipient,
-                &claimable,
-            );
+            
+            let splits_opt: Option<Vec<StreamSplit>> = env
+                .storage()
+                .persistent()
+                .get(&DataKey::StreamSplits(stream_id));
+
+            if let Some(splits) = splits_opt {
+                let mut remaining = claimable;
+                let len = splits.len();
+                for i in 0..len {
+                    let split = splits.get(i).unwrap();
+                    let amount = if i == len - 1 {
+                        remaining
+                    } else {
+                        let share_amount = (claimable * (split.share as i128)) / 10000;
+                        remaining -= share_amount;
+                        share_amount
+                    };
+                    if amount > 0 {
+                        token_client.transfer(
+                            &env.current_contract_address(),
+                            &split.recipient,
+                            &amount,
+                        );
+                    }
+                }
+            } else {
+                token_client.transfer(
+                    &env.current_contract_address(),
+                    &stream.recipient,
+                    &claimable,
+                );
+            }
         }
 
         let remainder = stream.total_amount - stream.claimed_amount;
@@ -408,7 +593,7 @@ mod test {
             max_entry_ttl: 6_312_000,
         });
 
-        let claimed = stream_client.claim(&stream_id);
+        let claimed = stream_client.claim(&recipient, &stream_id);
         assert!(claimed > 0);
         assert!(claimed < 1_000_000);
 
@@ -441,7 +626,7 @@ mod test {
             max_entry_ttl: 6_312_000,
         });
 
-        let claimed = stream_client.claim(&stream_id);
+        let claimed = stream_client.claim(&recipient, &stream_id);
         assert_eq!(claimed, 1_000_000);
 
         let stream = stream_client.get_stream(&stream_id).unwrap();
@@ -463,7 +648,7 @@ mod test {
         );
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            stream_client.claim(&stream_id);
+            stream_client.claim(&recipient, &stream_id);
         }));
         assert!(result.is_err());
     }
@@ -524,10 +709,113 @@ mod test {
             max_entry_ttl: 6_312_000,
         });
 
-        stream_client.claim(&stream_id);
+        stream_client.claim(&recipient, &stream_id);
         stream_client.tick(&stream_id);
 
         let stream = stream_client.get_stream(&stream_id).unwrap();
         assert_eq!(stream.status, StreamStatus::Completed);
     }
+
+    #[test]
+    fn test_create_split_stream_2_way() {
+        let (env, contract_id, owner, recipient1, token) = setup_test();
+        let recipient2 = Address::generate(&env);
+        let stream_client = RecurringStreamClient::new(&env, &contract_id);
+        
+        let splits = soroban_sdk::vec![&env, 
+            StreamSplit { recipient: recipient1.clone(), share: 5000 },
+            StreamSplit { recipient: recipient2.clone(), share: 5000 }
+        ];
+
+        let stream_id = stream_client.create_split_stream(
+            &owner,
+            &splits,
+            &token,
+            &1_000_000,
+            &1000,
+            &String::from_str(&env, "Test split"),
+        );
+
+        env.ledger().set(LedgerInfo {
+            protocol_version: 22,
+            sequence_number: 1500,
+            timestamp: 0,
+            network_id: [0u8; 32],
+            base_reserve: 0,
+            min_persistent_entry_ttl: 1000,
+            min_temp_entry_ttl: 1000,
+            max_entry_ttl: 6_312_000,
+        });
+
+        stream_client.claim(&recipient1, &stream_id);
+        
+        let tc = TokenClient::new(&env, &token);
+        assert_eq!(tc.balance(&recipient1), 250_000);
+        assert_eq!(tc.balance(&recipient2), 250_000);
+    }
+
+    #[test]
+    fn test_create_split_stream_3_way_dust() {
+        let (env, contract_id, owner, recipient1, token) = setup_test();
+        let recipient2 = Address::generate(&env);
+        let recipient3 = Address::generate(&env);
+        let stream_client = RecurringStreamClient::new(&env, &contract_id);
+        
+        let splits = soroban_sdk::vec![&env, 
+            StreamSplit { recipient: recipient1.clone(), share: 3333 },
+            StreamSplit { recipient: recipient2.clone(), share: 3333 },
+            StreamSplit { recipient: recipient3.clone(), share: 3334 }
+        ];
+
+        let stream_id = stream_client.create_split_stream(
+            &owner,
+            &splits,
+            &token,
+            &10_000_000,
+            &1000,
+            &String::from_str(&env, "Test split 3"),
+        );
+
+        env.ledger().set(LedgerInfo {
+            protocol_version: 22,
+            sequence_number: 1500, // half way -> 5_000_000
+            timestamp: 0,
+            network_id: [0u8; 32],
+            base_reserve: 0,
+            min_persistent_entry_ttl: 1000,
+            min_temp_entry_ttl: 1000,
+            max_entry_ttl: 6_312_000,
+        });
+
+        stream_client.claim(&recipient1, &stream_id);
+        
+        let tc = TokenClient::new(&env, &token);
+        // 5_000_000 * 3333 / 10000 = 1_666_500
+        assert_eq!(tc.balance(&recipient1), 1_666_500);
+        assert_eq!(tc.balance(&recipient2), 1_666_500);
+        assert_eq!(tc.balance(&recipient3), 1_666_500 + 500); // the remaining 500 dust
+    }
+
+    #[test]
+    #[should_panic(expected = "shares must sum to 10000")]
+    fn test_invalid_share_rejection() {
+        let (env, contract_id, owner, recipient1, token) = setup_test();
+        let recipient2 = Address::generate(&env);
+        let stream_client = RecurringStreamClient::new(&env, &contract_id);
+        
+        let splits = soroban_sdk::vec![&env, 
+            StreamSplit { recipient: recipient1.clone(), share: 5000 },
+            StreamSplit { recipient: recipient2.clone(), share: 4000 }
+        ];
+
+        stream_client.create_split_stream(
+            &owner,
+            &splits,
+            &token,
+            &1_000_000,
+            &1000,
+            &String::from_str(&env, "Test invalid"),
+        );
+    }
 }
+
