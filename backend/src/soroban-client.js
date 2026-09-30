@@ -32,6 +32,7 @@ export class SorobanClient {
   }
 
   scvU64(val) { return xdr.ScVal.scvU64(BigInt(val)); }
+  scvU32(val) { return xdr.ScVal.scvU32(Number(val)); }
   scvAddress(addr) {
     return Address.fromString(addr).toScVal();
   }

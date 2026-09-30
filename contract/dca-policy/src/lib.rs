@@ -10,12 +10,17 @@ contractmeta!(
     val = "Automated dollar-cost averaging policies"
 );
 
+/// Upper bound on how many records a single `get_execution_history` call returns.
+/// Callers paginate with `start` to walk the full history.
+pub const MAX_HISTORY_PAGE: u32 = 50;
+
 #[contracttype]
 pub enum DataKey {
     DCA(u64),
     Counter,
     DCAsByOwner(Address),
     Config,
+    ExecutionRecord(u64, u32),
 }
 
 #[contracttype]
@@ -47,6 +52,21 @@ pub enum DCAStatus {
     Active,
     Exhausted,
     Cancelled,
+}
+
+/// A single recorded swap execution, keyed by (dca_id, index) where index is
+/// 1-based and matches `DCAEntry::executions_completed` at write time.
+#[contracttype]
+#[derive(Clone)]
+pub struct ExecutionRecord {
+    pub index: u32,
+    pub dca_id: u64,
+    pub ledger: u32,
+    pub amount_in: i128,
+    pub amount_out: i128,
+    pub remaining_budget: i128,
+    pub next_execution_ledger: u32,
+    pub swapped: bool,
 }
 
 #[contract]
@@ -183,6 +203,8 @@ impl DCAPolicy {
             "insufficient budget"
         );
 
+        let swapped = dca.router.is_some() && dca.token_out.is_some();
+
         if let (Some(router), Some(token_out)) = (dca.router.clone(), dca.token_out.clone()) {
             let token_in_client = token::Client::new(&env, &dca.token_in);
             token_in_client.approve(
@@ -231,6 +253,24 @@ impl DCAPolicy {
         if dca.remaining_budget == 0 {
             dca.status = DCAStatus::Exhausted;
         }
+
+        let record = ExecutionRecord {
+            index: dca.executions_completed,
+            dca_id,
+            ledger: dca.last_executed_ledger,
+            amount_in: dca.amount_per_swap,
+            amount_out: dca.last_swap_output,
+            remaining_budget: dca.remaining_budget,
+            next_execution_ledger: dca.next_execution_ledger,
+            swapped,
+        };
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::ExecutionRecord(dca_id, record.index), &record);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::ExecutionRecord(dca_id, record.index), 6_312_000, 6_312_000);
 
         env.storage().persistent().set(&DataKey::DCA(dca_id), &dca);
         env.storage()
@@ -310,6 +350,49 @@ impl DCAPolicy {
             .persistent()
             .get(&DataKey::DCAsByOwner(owner))
             .unwrap_or(Vec::new(&env))
+    }
+
+    /// Returns up to `limit` execution records for `dca_id`, starting at the
+    /// 1-based `start` index. `limit` is clamped to `MAX_HISTORY_PAGE`.
+    /// Returns an empty vec when the DCA has no executions or `start` is past
+    /// the end of history.
+    pub fn get_execution_history(env: Env, dca_id: u64, start: u32, limit: u32) -> Vec<ExecutionRecord> {
+        let dca: DCAEntry = env
+            .storage()
+            .persistent()
+            .get(&DataKey::DCA(dca_id))
+            .expect("DCA not found");
+
+        let cap = limit.min(MAX_HISTORY_PAGE);
+        let mut records: Vec<ExecutionRecord> = Vec::new(&env);
+        if cap == 0 || start > dca.executions_completed {
+            return records;
+        }
+
+        let total = dca.executions_completed;
+        let end = total.min(start.saturating_add(cap).saturating_sub(1));
+        let mut index = start;
+        while index <= end {
+            if let Some(record) = env
+                .storage()
+                .persistent()
+                .get(&DataKey::ExecutionRecord(dca_id, index))
+            {
+                records.push_back(record);
+            }
+            index += 1;
+        }
+        records
+    }
+
+    /// Number of executions recorded for `dca_id`.
+    pub fn get_execution_count(env: Env, dca_id: u64) -> u32 {
+        let dca: DCAEntry = env
+            .storage()
+            .persistent()
+            .get(&DataKey::DCA(dca_id))
+            .expect("DCA not found");
+        dca.executions_completed
     }
 
     pub fn current_ledger(env: Env) -> u32 {
@@ -634,6 +717,199 @@ mod test {
             token_out_admin_client.mint(&to, &output);
             output
         }
+    }
+
+    fn advance_to(env: &Env, sequence: u32) {
+        env.ledger().set(LedgerInfo {
+            protocol_version: 22,
+            sequence_number: sequence,
+            timestamp: 0,
+            network_id: [0u8; 32],
+            base_reserve: 0,
+            min_persistent_entry_ttl: 1000,
+            min_temp_entry_ttl: 1000,
+            max_entry_ttl: 6_312_000,
+        });
+    }
+
+    #[test]
+    fn test_execution_history_records_each_swap() {
+        let (env, contract_id, owner, swap_receiver, token) = setup_test();
+        let dca_client = DCAPolicyClient::new(&env, &contract_id);
+
+        let dca_id = dca_client.create_dca(
+            &owner,
+            &token,
+            &swap_receiver,
+            &500_000,
+            &100_000,
+            &120,
+            &String::from_str(&env, "History DCA"),
+        );
+
+        let history = dca_client.get_execution_history(&dca_id, &1, &50);
+        assert_eq!(history.len(), 0);
+        assert_eq!(dca_client.get_execution_count(&dca_id), 0);
+
+        for i in 0..5u32 {
+            advance_to(&env, 1000 + (i * 120) + 120);
+            dca_client.execute_swap(&dca_id);
+        }
+
+        assert_eq!(dca_client.get_execution_count(&dca_id), 5);
+
+        let history = dca_client.get_execution_history(&dca_id, &1, &50);
+        assert_eq!(history.len(), 5);
+
+        for (i, record) in history.iter().enumerate() {
+            let expected_index = i as u32 + 1;
+            assert_eq!(record.index, expected_index);
+            assert_eq!(record.dca_id, dca_id);
+            assert_eq!(record.amount_in, 100_000);
+            assert_eq!(record.amount_out, 100_000);
+            assert_eq!(record.remaining_budget, 500_000 - (100_000 * expected_index as i128));
+            assert_eq!(record.ledger, 1000 + (expected_index as u32 - 1) * 120 + 120);
+            assert!(!record.swapped);
+        }
+
+        assert_eq!(history.last().unwrap().remaining_budget, 0);
+    }
+
+    #[test]
+    fn test_execution_history_paginates() {
+        let (env, contract_id, owner, swap_receiver, token) = setup_test();
+        let dca_client = DCAPolicyClient::new(&env, &contract_id);
+
+        let dca_id = dca_client.create_dca(
+            &owner,
+            &token,
+            &swap_receiver,
+            &500_000,
+            &100_000,
+            &120,
+            &String::from_str(&env, "Paged DCA"),
+        );
+
+        for i in 0..5u32 {
+            advance_to(&env, 1000 + (i * 120) + 120);
+            dca_client.execute_swap(&dca_id);
+        }
+
+        let page_one = dca_client.get_execution_history(&dca_id, &1, &2);
+        assert_eq!(page_one.len(), 2);
+        assert_eq!(page_one.get(0).unwrap().index, 1);
+        assert_eq!(page_one.get(1).unwrap().index, 2);
+
+        let page_two = dca_client.get_execution_history(&dca_id, &3, &2);
+        assert_eq!(page_two.len(), 2);
+        assert_eq!(page_two.get(0).unwrap().index, 3);
+        assert_eq!(page_two.get(1).unwrap().index, 4);
+
+        let last = dca_client.get_execution_history(&dca_id, &5, &2);
+        assert_eq!(last.len(), 1);
+        assert_eq!(last.get(0).unwrap().index, 5);
+
+        let past_end = dca_client.get_execution_history(&dca_id, &6, &2);
+        assert_eq!(past_end.len(), 0);
+    }
+
+    #[test]
+    fn test_execution_history_limit_is_clamped() {
+        let (env, contract_id, owner, swap_receiver, token) = setup_test();
+        let dca_client = DCAPolicyClient::new(&env, &contract_id);
+
+        let dca_id = dca_client.create_dca(
+            &owner,
+            &token,
+            &swap_receiver,
+            &500_000,
+            &100_000,
+            &120,
+            &String::from_str(&env, "Clamp DCA"),
+        );
+
+        for i in 0..5u32 {
+            advance_to(&env, 1000 + (i * 120) + 120);
+            dca_client.execute_swap(&dca_id);
+        }
+
+        let clamped = dca_client.get_execution_history(&dca_id, &1, &10_000);
+        assert!(clamped.len() as u32 <= MAX_HISTORY_PAGE);
+
+        let zero_limit = dca_client.get_execution_history(&dca_id, &1, &0);
+        assert_eq!(zero_limit.len(), 0);
+    }
+
+    #[test]
+    fn test_execution_history_records_swapped_flag() {
+        let (env, contract_id, owner, swap_receiver, token_in) = setup_test();
+        let dca_client = DCAPolicyClient::new(&env, &contract_id);
+
+        let router_id = env.register(MockRouter, ());
+        let token_out_admin = Address::generate(&env);
+        let token_out = env
+            .register_stellar_asset_contract_v2(token_out_admin)
+            .address();
+
+        let dca_id = dca_client.create_dca_swap(
+            &owner,
+            &token_in,
+            &Some(token_out),
+            &Some(router_id),
+            &swap_receiver,
+            &500_000,
+            &100_000,
+            &95_000,
+            &120,
+            &String::from_str(&env, "Router History"),
+        );
+
+        advance_to(&env, 1120);
+        dca_client.execute_swap(&dca_id);
+
+        let history = dca_client.get_execution_history(&dca_id, &1, &50);
+        assert_eq!(history.len(), 1);
+        let record = history.get(0).unwrap();
+        assert!(record.swapped);
+        assert_eq!(record.amount_in, 100_000);
+        assert_eq!(record.amount_out, 95_010);
+        assert_eq!(record.next_execution_ledger, 1120 + 120);
+    }
+
+    #[test]
+    fn test_execution_history_survives_cancel() {
+        let (env, contract_id, owner, swap_receiver, token) = setup_test();
+        let dca_client = DCAPolicyClient::new(&env, &contract_id);
+
+        let dca_id = dca_client.create_dca(
+            &owner,
+            &token,
+            &swap_receiver,
+            &1_000_000,
+            &100_000,
+            &120,
+            &String::from_str(&env, "Cancel History"),
+        );
+
+        advance_to(&env, 1120);
+        dca_client.execute_swap(&dca_id);
+        dca_client.cancel(&dca_id);
+
+        let history = dca_client.get_execution_history(&dca_id, &1, &50);
+        assert_eq!(history.len(), 1);
+        assert_eq!(history.get(0).unwrap().index, 1);
+        assert_eq!(dca_client.get_execution_count(&dca_id), 1);
+    }
+
+    #[test]
+    fn test_execution_history_unknown_dca_panics() {
+        let (env, contract_id, _owner, _swap_receiver, _token) = setup_test();
+        let dca_client = DCAPolicyClient::new(&env, &contract_id);
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            dca_client.get_execution_history(&99, &1, &10);
+        }));
+        assert!(result.is_err());
     }
 
     #[test]
