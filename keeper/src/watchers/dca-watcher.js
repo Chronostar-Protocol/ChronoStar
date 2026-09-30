@@ -1,5 +1,6 @@
 import { xdr } from '@stellar/stellar-sdk';
 import { logger, generateCorrelationId } from '../logger.js';
+import { runCoordinated } from '../coordination.js';
 
 export class DCAWatcher {
   constructor(sorobanClient, contractId, parentLogger = logger) {
@@ -50,12 +51,12 @@ export class DCAWatcher {
 
         if (currentSeq >= nextExec) {
           cycleLogger.info({ dcaId: i }, 'executing DCA swap');
-          await this.client.invokeContract(
+          await runCoordinated(this.client, 'dca', i, () => this.client.invokeContract(
             this.contractId,
             'execute_swap',
             [xdr.ScVal.scvU64(BigInt(i))],
             correlationId,
-          );
+          ));
         }
       }
     } catch (err) {

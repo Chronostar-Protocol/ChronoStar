@@ -3,6 +3,8 @@ export const config = {
   vaultContractId: process.env.VAULT_CONTRACT_ID || '',
   streamContractId: process.env.STREAM_CONTRACT_ID || '',
   dcaContractId: process.env.DCA_CONTRACT_ID || '',
+  coordinatorContractId: process.env.COORDINATOR_CONTRACT_ID || '',
+  coordinatorLockTtlLedgers: parseInt(process.env.COORDINATOR_LOCK_TTL_LEDGERS || '20', 10),
   rpcUrl: process.env.STELLAR_RPC_URL || 'https://soroban-testnet.stellar.org',
   networkPassphrase: process.env.STELLAR_NETWORK_PASSPHRASE || 'Test SDF Network ; September 2015',
   pollIntervalMs: parseInt(process.env.POLL_INTERVAL_MS || '30000', 10),
