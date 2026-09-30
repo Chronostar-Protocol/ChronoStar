@@ -36,6 +36,9 @@ export class DCAWatcher {
       if (!dcaCount) return;
 
       const numDcas = Number(dcaCount);
+      const currentSeq = Number(
+        await this.client.readContract(this.contractId, 'current_ledger', []),
+      );
       for (let i = 1; i <= numDcas; i++) {
         const dca = await this.client.readContract(
           this.contractId,
@@ -46,7 +49,6 @@ export class DCAWatcher {
         const entry = dca[0];
         if (entry.status?.[0] !== 'Active') continue;
 
-        const currentSeq = Number(await this.client.readContract(this.contractId, 'current_ledger', []));
         const nextExec = Number(entry.next_execution_ledger);
 
         if (currentSeq >= nextExec) {

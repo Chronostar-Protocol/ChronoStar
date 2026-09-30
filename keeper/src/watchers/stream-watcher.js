@@ -36,6 +36,9 @@ export class StreamWatcher {
       if (!streamCount) return;
 
       const numStreams = Number(streamCount);
+      const currentSeq = Number(
+        await this.client.readContract(this.contractId, 'current_ledger', []),
+      );
       for (let i = 1; i <= numStreams; i++) {
         const stream = await this.client.readContract(
           this.contractId,
