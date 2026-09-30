@@ -41,6 +41,24 @@ export interface DCAEntry {
   status: 'Active' | 'Exhausted' | 'Cancelled';
 }
 
+export interface DCAExecution {
+  index: number;
+  dca_id: number;
+  ledger: number;
+  amount_in: string;
+  amount_out: string;
+  remaining_budget: string;
+  next_execution_ledger: number;
+  swapped: boolean;
+}
+
+export interface DCAExecutionHistory {
+  dcaId: number;
+  start: number;
+  limit: number;
+  executions: DCAExecution[];
+}
+
 export interface ScheduleEvent {
   type: 'vault' | 'stream' | 'dca';
   id: number;
