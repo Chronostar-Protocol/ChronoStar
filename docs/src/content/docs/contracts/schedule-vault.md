@@ -7,9 +7,9 @@ description: Lock funds and release at a future ledger.
 
 ScheduleVault lets you lock tokens and release them to a recipient at a specific future ledger. This is useful for:
 
-- **Vesting**: Lock tokens for a team member, release after a cliff
-- **Escrow**: Hold funds until a condition is met
-- **Deferred payroll**: Pre-fund payroll, release on payday
+- -- **Vesting**: Lock tokens for a team member, release after a cliff
+- -- **Escrow**: Hold funds until a condition is met
+- - **Deferred payroll**: Pre-fund payroll, release on payday
 
 ## Interface
 
@@ -34,6 +34,36 @@ Creates a new vault. Transfers `amount` of `token` from `owner` to the contract.
 - `release_ledger` must be in the future
 - `label` max 64 characters
 
+### `create_vaults`
+
+```rust
+fn create_vaults(
+    env: Env,
+    owner: Address,
+    recipients: Vec<Address>,
+    token: Address,
+    amount: i128,
+    release_ledger: u32,
+    label_prefix: String,
+) -> Vec<u64>
+```
+
+Creates one vault per recipient in a single transaction. Every vault shares the same `token`, `amount`, and `release_ledger`, so the keeper needs a single due-check pass over the returned vault IDs. Returns the new vault IDs in the same order as `recipients`.
+
+- `owner.require_auth()` — owner must authorize
+- `recipients.len()` must be between 1 and `MAX_BATCH_SIZE`
+- `amount` must be positive
+- `release_ledger` must be in the future
+- each label is formed from `label_prefix` plus the recipient index, max 64 characters
+
+### `MAX_BATCH_SIZE`
+
+```rust
+const MAX_BATCH_SIZE: u32 = 32;
+```
+
+Caps the number of recipients a single `create_vaults` call may create, protecting the resource budget of the transaction.
+
 ### `release`
 
 ```rust
@@ -49,6 +79,25 @@ fn cancel(env: Env, vault_id: u64)
 ```
 
 Cancels the vault and returns tokens to the owner. Only callable before `release_ledger`. Requires owner auth.
+
+### `transfer_ownership`
+
+```rust
+fn transfer_ownership(env: Env, vault_id: u64, new_owner: Address)
+```
+
+Transfers control of the vault to `new_owner`. The recipient remains unchanged. The new owner becomes the funder, gaining the ability to cancel the vault and claim the tokens, or transfer ownership again. The old owner loses these rights immediately.
+
+- Requires current owner auth
+- Only allowed on `Active` vaults
+
+## Owner vs Recipient
+
+```mermaid
+flowchart LR
+    Owner[Owner (Funder)] -- "Funds vault\nCan cancel/transfer" --> Vault
+    Vault -- "Releases funds" --> Recipient[Recipient (Payee)]
+```
 
 ### `get_vault`
 
@@ -86,3 +135,8 @@ cargo test -p schedule-vault
 ```
 
 All 7 tests must pass.
+All tests must pass, including the batch creation coverage for a 3-recipient batch, an empty batch, and a batch over `MAX_BATCH_SIZE`.
+
+## Footprint notes
+
+`create_vaults` writes one vault entry plus one owner-index entry per recipient, so a batch of `N` costs `O(N`) entries and a corresponding increase in transaction resource usage. bMAX_BATCH_SIZE` bounds the worst-case entry count so the call remains within the resource budget; callers needing larger disbursements split them into multiple batches.
