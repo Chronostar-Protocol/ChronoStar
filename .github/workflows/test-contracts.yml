@@ -13,8 +13,8 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions/checkout@v7
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
         with:
           target: wasm32-unknown-unknown
       - run: cargo fmt --check
@@ -26,15 +26,15 @@ jobs:
     runs-on: ubuntu-latest
     needs: lint
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions/checkout@v7
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
         with:
           target: wasm32-unknown-unknown
       - run: cargo test
         working-directory: contract
       - run: cargo tarpaulin --out Xml --timeout 120
         working-directory: contract
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: contract-coverage
           path: contract/cobertura.xml
