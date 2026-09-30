@@ -101,6 +101,15 @@ describe('StreamWatcher', () => {
         [{ status: ['Active'], end_ledger: 300 }],
       ]),
       invokeContract: mock.fn(),
+  it('skips paused streams', async () => {
+    const invokeContract = mock.fn();
+    const client = {
+      readContract: mockReadContract([
+        1,
+        [{ status: ['Paused'], end_ledger: 100 }],
+        200,
+      ]),
+      invokeContract,
     };
 
     const watcher = new StreamWatcher(client, 'C...');
@@ -110,5 +119,6 @@ describe('StreamWatcher', () => {
       ({ arguments: args }) => args[1] === 'current_ledger',
     );
     assert.strictEqual(ledgerCalls.length, 1);
+    assert.strictEqual(invokeContract.mock.callCount(), 0);
   });
 });

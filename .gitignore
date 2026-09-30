@@ -8,6 +8,7 @@ target/
 .DS_Store
 *.log
 .astro/
+test_snapshots/
 
 # Playwright
 frontend/playwright-report/
