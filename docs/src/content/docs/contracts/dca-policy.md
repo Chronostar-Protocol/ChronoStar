@@ -84,4 +84,4 @@ cd contract
 cargo test -p dca-policy
 ```
 
-All 6 tests must pass.
+All 7 tests must pass.

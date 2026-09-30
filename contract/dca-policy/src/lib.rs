@@ -390,8 +390,8 @@ mod test {
         let (_, topics, data) = events
             .iter()
             .find(|(_, topics, _)| {
-                Symbol::try_from_val(&env, &topics.get(0).unwrap())
-                    .map_or(false, |name| name == symbol_short!("created"))
+                Symbol::try_from_val(&env, &topics.first().unwrap())
+                    .is_ok_and(|name| name == symbol_short!("created"))
             })
             .expect("created event not published");
 
@@ -399,7 +399,7 @@ mod test {
         let event_id = u64::try_from_val(&env, &topics.get(1).unwrap()).unwrap();
         assert_eq!(event_id, dca_id);
 
-        let created = DCACreated::try_from_val(&env, data).unwrap();
+        let created = DCACreated::try_from_val(&env, &data).unwrap();
         assert_eq!(created.owner, owner);
         assert_eq!(created.next_execution_ledger, 2440);
     }
@@ -551,6 +551,9 @@ mod test {
     #[test]
     fn test_execute_swap_with_router() {
         let (env, contract_id, owner, swap_receiver, token_in) = setup_test();
+        // The router mints output tokens from a nested invocation, which needs
+        // auth that is not tied to the root `execute_swap` call.
+        env.mock_all_auths_allowing_non_root_auth();
         let dca_client = DCAPolicyClient::new(&env, &contract_id);
 
         let router_id = env.register(MockRouter, ());
@@ -559,6 +562,12 @@ mod test {
         let token_out = env
             .register_stellar_asset_contract_v2(token_out_admin.clone())
             .address();
+
+        // The router is only invoked after the ledger has been advanced past its
+        // default instance TTL, so bump it here to keep the entry alive.
+        env.as_contract(&router_id, || {
+            env.storage().instance().extend_ttl(6_312_000, 6_312_000);
+        });
 
         let dca_id = dca_client.create_dca_swap(
             &owner,

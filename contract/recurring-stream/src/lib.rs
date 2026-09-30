@@ -71,6 +71,9 @@ impl StreamEntry {
     }
 }
 
+#[contract]
+pub struct RecurringStream;
+
 #[contractimpl]
 impl RecurringStream {
     pub fn create_stream(
@@ -561,8 +564,8 @@ mod test {
         let (_, topics, data) = events
             .iter()
             .find(|(_, topics, _)| {
-                Symbol::try_from_val(&env, &topics.get(0).unwrap())
-                    .map_or(false, |name| name == symbol_short!("created"))
+                Symbol::try_from_val(&env, &topics.first().unwrap())
+                    .is_ok_and(|name| name == symbol_short!("created"))
             })
             .expect("created event not published");
 
@@ -570,7 +573,7 @@ mod test {
         let event_id = u64::try_from_val(&env, &topics.get(1).unwrap()).unwrap();
         assert_eq!(event_id, stream_id);
 
-        let created = StreamCreated::try_from_val(&env, data).unwrap();
+        let created = StreamCreated::try_from_val(&env, &data).unwrap();
         assert_eq!(created.owner, owner);
         assert_eq!(created.end_ledger, 2440);
     }

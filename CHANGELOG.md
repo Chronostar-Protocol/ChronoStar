@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Multi-asset DCA design & scoping document (`docs/.../contracts/dca-multi-asset.md`)
 
 ### Fixed
+- Restored the `#[contract] pub struct RecurringStream;` declaration removed in #201, which left `recurring-stream` uncompilable and failed the `Test Contracts` job
+- `test_execute_swap_with_router` now bumps the mock router's instance TTL before the ledger jump and allows non-root auth, so it no longer panics with an archived instance key / invalid auth action
 - `cargo fmt --check` violations in the `dca-policy` import list and a stray blank-line run in `recurring-stream`, which were failing the `Test Contracts` lint job
 - CI branch triggers changed from `main` to `master` to match default branch
 

@@ -422,8 +422,8 @@ mod test {
         let (_, topics, data) = events
             .iter()
             .find(|(_, topics, _)| {
-                Symbol::try_from_val(&env, &topics.get(0).unwrap())
-                    .map_or(false, |name| name == symbol_short!("created"))
+                Symbol::try_from_val(&env, &topics.first().unwrap())
+                    .is_ok_and(|name| name == symbol_short!("created"))
             })
             .expect("created event not published");
 
@@ -431,7 +431,7 @@ mod test {
         let event_id = u64::try_from_val(&env, &topics.get(1).unwrap()).unwrap();
         assert_eq!(event_id, vault_id);
 
-        let created = VaultCreated::try_from_val(&env, data).unwrap();
+        let created = VaultCreated::try_from_val(&env, &data).unwrap();
         assert_eq!(created.owner, owner);
         assert_eq!(created.release_ledger, 2000);
     }
