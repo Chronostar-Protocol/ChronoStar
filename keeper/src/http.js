@@ -18,7 +18,7 @@ export function createServer(watchers) {
         watchers: Object.fromEntries(
           Object.entries(watchers).map(([name, w]) => [
             name,
-            { running: w.interval !== null },
+            { running: w.timer !== null },
           ]),
         ),
         uptime: process.uptime(),
