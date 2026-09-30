@@ -3,7 +3,7 @@ use soroban_sdk{
 #`!no_std]
 use soroban_sdk({
     contract, contractimpl, contractmeta, contracttype, symbol_short, token, Address, Env, String,
-    Vec,
+    Symbol, Vec,
 };
 
 contractmeta!(key = "name", val = "ChronoStar Recurring Stream");
@@ -395,6 +395,70 @@ impl RecurringStream {
         );
     }
 
+    pub fn change_recipient(env: Env, stream_id: u64, new_recipient: Address) {
+        let mut stream: StreamEntry = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Stream(stream_id))
+            .expect("stream not found");
+
+        stream.owner.require_auth();
+        assert!(stream.status == StreamStatus::Active, "stream not active");
+
+        let old_recipient = stream.recipient.clone();
+        if old_recipient != new_recipient {
+            let old_key = DataKey::StreamsByRecipient(old_recipient.clone());
+            let old_streams: Vec<u64> = env
+                .storage()
+                .persistent()
+                .get(&old_key)
+                .unwrap_or(Vec::new(&env));
+            let mut updated_old_streams = Vec::new(&env);
+            for id in old_streams.iter() {
+                if id != stream_id {
+                    updated_old_streams.push_back(id);
+                }
+            }
+            if updated_old_streams.is_empty() {
+                env.storage().persistent().remove(&old_key);
+            } else {
+                env.storage()
+                    .persistent()
+                    .set(&old_key, &updated_old_streams);
+                env.storage()
+                    .persistent()
+                    .extend_ttl(&old_key, 6_312_000, 6_312_000);
+            }
+
+            let new_key = DataKey::StreamsByRecipient(new_recipient.clone());
+            let mut new_streams: Vec<u64> = env
+                .storage()
+                .persistent()
+                .get(&new_key)
+                .unwrap_or(Vec::new(&env));
+            if !new_streams.contains(stream_id) {
+                new_streams.push_back(stream_id);
+            }
+            env.storage().persistent().set(&new_key, &new_streams);
+            env.storage()
+                .persistent()
+                .extend_ttl(&new_key, 6_312_000, 6_312_000);
+
+            stream.recipient = new_recipient.clone();
+            env.storage()
+                .persistent()
+                .set(&DataKey::Stream(stream_id), &stream);
+            env.storage()
+                .persistent()
+                .extend_ttl(&DataKey::Stream(stream_id), 6_312_000, 6_312_000);
+        }
+
+        env.events().publish(
+            (Symbol::new(&env, "recipient_changed"), stream_id),
+            (old_recipient, new_recipient),
+        );
+    }
+
     pub fn get_stream(env: Env, stream_id: u64) -> Option<StreamEntry> {
         env.storage().persistent().get(&DataKey::Stream(stream_id))
     }
@@ -762,6 +826,86 @@ mod test {
     }
 
     #[test]
+    fn test_change_recipient_updates_index() {
+        let (env, contract_id, owner, old_recipient, token) = setup_test();
+        let new_recipient = Address::generate(&env);
+        let stream_client = RecurringStreamClient::new(&env, &contract_id);
+        let stream_id = stream_client.create_stream(
+            &owner,
+            &old_recipient,
+            &token,
+            &1_000_000,
+            &1440,
+            &String::from_str(&env, "Test stream"),
+        );
+
+        stream_client.change_recipient(&stream_id, &new_recipient);
+
+        let stream = stream_client.get_stream(&stream_id).unwrap();
+        assert_eq!(stream.recipient, new_recipient);
+        assert!(stream_client
+            .get_streams_by_recipient(&old_recipient)
+            .is_empty());
+        assert_eq!(
+            stream_client.get_streams_by_recipient(&new_recipient),
+            Vec::from_array(&env, [stream_id])
+        );
+    }
+
+    #[test]
+    fn test_change_recipient_rejected_after_completion() {
+        let (env, contract_id, owner, recipient, token) = setup_test();
+        let new_recipient = Address::generate(&env);
+        let stream_client = RecurringStreamClient::new(&env, &contract_id);
+        let stream_id = stream_client.create_stream(
+            &owner,
+            &recipient,
+            &token,
+            &1_000_000,
+            &1000,
+            &String::from_str(&env, "Test stream"),
+        );
+        env.ledger().set(LedgerInfo {
+            protocol_version: 22,
+            sequence_number: 2000,
+            timestamp: 0,
+            network_id: [0u8; 32],
+            base_reserve: 0,
+            min_persistent_entry_ttl: 1000,
+            min_temp_entry_ttl: 1000,
+            max_entry_ttl: 6_312_000,
+        });
+        stream_client.claim(&stream_id);
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            stream_client.change_recipient(&stream_id, &new_recipient);
+        }));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_change_recipient_rejected_after_cancellation() {
+        let (env, contract_id, owner, recipient, token) = setup_test();
+        let new_recipient = Address::generate(&env);
+        let stream_client = RecurringStreamClient::new(&env, &contract_id);
+        let stream_id = stream_client.create_stream(
+            &owner,
+            &recipient,
+            &token,
+            &1_000_000,
+            &1440,
+            &String::from_str(&env, "Test stream"),
+        );
+        stream_client.cancel(&stream_id);
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            stream_client.change_recipient(&stream_id, &new_recipient);
+        }));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_tick_marks_completed() {
     fn test_claim_after_cliff_partial() {
         let (env, contract_id, owner, recipient, token) = setup_test();
         let stream_client = RecurringStreamClient::new(&env, &contract_id);
