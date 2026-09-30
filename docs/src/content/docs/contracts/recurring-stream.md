@@ -130,6 +130,15 @@ fn get_stream(env: Env, stream_id: u64) -> Option<StreamEntry>
 fn get_claimable(env: Env, stream_id: u64) -> i129
 ```
 
+## Events
+
+Every event uses two topics: the event name and the stream ID.
+
+- `created` — published by `create_stream`. Data is `StreamCreated { owner, end_ledger }`.
+- `claimed` — published by `claim`. Data is the claimed amount.
+- `completed` — published by `claim` and `tick` when the stream finishes. Data is the recipient address.
+- `cancelled` — published by `cancel`. Data is the owner address.
+
 ## Testing
 
 ```bash
@@ -137,5 +146,6 @@ cd contract
 cargo test -p recurring-stream
 ```
 
+All 7 tests must pass.
 All tests must pass, including a property-style test asserting total vested never exceeds `total_amount` across a pause/resume cycle.
 All tests must pass, including tests for pre-cliff claim rejection and a post-cliff partial claim.

@@ -47,6 +47,13 @@ pub enum VaultStatus {
     Reclaimed,
 }
 
+#[contracttype]
+#[derive(Clone)]
+pub struct VaultCreated {
+    pub owner: Address,
+    pub release_ledger: u32,
+}
+
 #[contract]
 pub struct ScheduleVault;
 
@@ -136,6 +143,14 @@ impl ScheduleVault {
             .extend_ttl(&DataKey::VaultsByRecipient(recipient), 6_312_000, 6_312_000);
 
         env.storage().instance().extend_ttl(100_000, 100_000);
+
+        env.events().publish(
+            (symbol_short!("created"), id),
+            VaultCreated {
+                owner: vault.owner.clone(),
+                release_ledger: vault.release_ledger,
+            },
+        );
 
         id
     }
@@ -433,9 +448,9 @@ extern crate std;
 mod test {
     use super::*;
     use soroban_sdk::{
-        testutils::{Address as _, Ledger, LedgerInfo},
+        testutils::{Address as _, Events as _, Ledger, LedgerInfo},
         token::{StellarAssetClient as TokenAdminClient, TokenClient},
-        Env,
+        Env, Symbol, TryFromVal,
     };
 
     fn setup_test() -> (Env, Address, Address, Address, Address) {
@@ -782,5 +797,37 @@ mod test {
             );
         }));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_create_vault_emits_created_event() {
+        let (env, contract_id, owner, recipient, token) = setup_test();
+        let vault_client = ScheduleVaultClient::new(&env, &contract_id);
+
+        let vault_id = vault_client.create_vault(
+            &owner,
+            &recipient,
+            &token,
+            &1_000_000,
+            &2000,
+            &String::from_str(&env, "Test vault"),
+        );
+
+        let events = env.events().all();
+        let (_, topics, data) = events
+            .iter()
+            .find(|(_, topics, _)| {
+                Symbol::try_from_val(&env, &topics.first().unwrap())
+                    .is_ok_and(|name| name == symbol_short!("created"))
+            })
+            .expect("created event not published");
+
+        assert_eq!(topics.len(), 2);
+        let event_id = u64::try_from_val(&env, &topics.get(1).unwrap()).unwrap();
+        assert_eq!(event_id, vault_id);
+
+        let created = VaultCreated::try_from_val(&env, &data).unwrap();
+        assert_eq!(created.owner, owner);
+        assert_eq!(created.release_ledger, 2000);
     }
 }

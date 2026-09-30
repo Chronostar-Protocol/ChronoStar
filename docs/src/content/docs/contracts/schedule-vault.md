@@ -119,6 +119,14 @@ fn get_vaults_by_owner(env: Env, owner: Address) -> Vec<u64>
 | `Released` | Tokens have been transferred to recipient |
 | `Cancelled` | Tokens have been returned to owner |
 
+## Events
+
+Every event uses two topics: the event name and the vault ID.
+
+- `created` — published by `create_vault`. Data is `VaultCreated { owner, release_ledger }`.
+- `released` — published by `release`. Data is the recipient address.
+- `cancelled` — published by `cancel`. Data is the owner address.
+
 ## Testing
 
 ```bash
@@ -126,6 +134,7 @@ cd contract
 cargo test -p schedule-vault
 ```
 
+All 7 tests must pass.
 All tests must pass, including the batch creation coverage for a 3-recipient batch, an empty batch, and a batch over `MAX_BATCH_SIZE`.
 
 ## Footprint notes

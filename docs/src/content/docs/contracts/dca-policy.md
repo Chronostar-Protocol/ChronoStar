@@ -103,6 +103,14 @@ Number of executions recorded for a policy.
 | `Exhausted` | All swaps executed, budget fully spent |
 | `Cancelled` | Cancelled by owner, remaining budget returned |
 
+## Events
+
+Every event uses two topics: the event name and the DCA ID.
+
+- `created` — published by `create_dca` and `create_dca_swap`. Data is `DCACreated { owner, next_execution_ledger }`.
+- `swap` — published by `execute_swap`. Data is the running execution count.
+- `cancelled` — published by `cancel`. Data is the owner address.
+
 ## Testing
 
 ```bash
@@ -110,4 +118,5 @@ cd contract
 cargo test -p dca-policy
 ```
 
+All 7 tests must pass.
 All tests must pass, including the execution history coverage.

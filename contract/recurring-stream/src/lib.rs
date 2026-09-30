@@ -60,6 +60,13 @@ pub enum StreamStatus {
     Cancelled,
 }
 
+#[contracttype]
+#[derive(Clone)]
+pub struct StreamCreated {
+    pub owner: Address,
+    pub end_ledger: u32,
+}
+
 impl StreamEntry {
     // Number of ledgers the stream has been active (excluding paused intervals)
     // as of `current_ledger`.
@@ -104,7 +111,8 @@ impl StreamEntry {
     }
 }
 
-
+#[contract]
+pub struct RecurringStream;
 
 #[contractimpl]
 impl RecurringStream {
@@ -201,6 +209,14 @@ impl RecurringStream {
         );
 
         env.storage().instance().extend_ttl(100_000, 100_000);
+
+        env.events().publish(
+            (symbol_short!("created"), id),
+            StreamCreated {
+                owner: stream.owner.clone(),
+                end_ledger: stream.end_ledger,
+            },
+        );
 
         id
     }
@@ -716,12 +732,14 @@ extern crate std;
 #[cfg(test)]
 mod test {
     use super::*;
+    use soroban_sdk::{
+        testutils::{Address as _, Events as _, Ledger, LedgerInfo},
     use soroban_sdk{
         testutils:{Address as _, Ledger, LedgerInfo},
     use soroban_sdk {
         testutils::{Address as _, Ledger, LedgerInfo},
         token::{StellarAssetClient as TokenAdminClient, TokenClient},
-        Env,
+        Env, Symbol, TryFromVal,
     };
 
     fn setup_test() -> (Env, Address, Address, Address, Address) {
@@ -1430,6 +1448,38 @@ mod test {
             stream_client.claim(&stream_id);
         }));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_create_stream_emits_created_event() {
+        let (env, contract_id, owner, recipient, token) = setup_test();
+        let stream_client = RecurringStreamClient::new(&env, &contract_id);
+
+        let stream_id = stream_client.create_stream(
+            &owner,
+            &recipient,
+            &token,
+            &1_000_000,
+            &1440,
+            &String::from_str(&env, "Test stream"),
+        );
+
+        let events = env.events().all();
+        let (_, topics, data) = events
+            .iter()
+            .find(|(_, topics, _)| {
+                Symbol::try_from_val(&env, &topics.first().unwrap())
+                    .is_ok_and(|name| name == symbol_short!("created"))
+            })
+            .expect("created event not published");
+
+        assert_eq!(topics.len(), 2);
+        let event_id = u64::try_from_val(&env, &topics.get(1).unwrap()).unwrap();
+        assert_eq!(event_id, stream_id);
+
+        let created = StreamCreated::try_from_val(&env, &data).unwrap();
+        assert_eq!(created.owner, owner);
+        assert_eq!(created.end_ledger, 2440);
     }
 }
 
