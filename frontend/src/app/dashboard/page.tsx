@@ -184,6 +184,7 @@ function StatusBadge({ status }: { status: string }) {
     Completed: 'bg-accent-blue/10 text-accent-blue border-accent-blue/30',
     Cancelled: 'bg-accent-red/10 text-accent-red border-accent-red/30',
     Exhausted: 'bg-accent-orange/10 text-accent-orange border-accent-orange/30',
+    Paused: 'bg-accent-orange/10 text-accent-orange border-accent-orange/30',
   };
 
   return (

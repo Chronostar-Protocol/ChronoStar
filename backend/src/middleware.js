@@ -23,7 +23,7 @@ export function validateStellarAddress(req, res, next) {
 export const globalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 500,
-  standardHeaders: true,
+  standardHeaders: false,
   legacyHeaders: false,
   message: { error: 'Too many requests, please try again later.' },
 });

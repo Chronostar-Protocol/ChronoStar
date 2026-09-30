@@ -91,4 +91,21 @@ describe('StreamWatcher', () => {
 
     assert.strictEqual(invokeContract.mock.callCount(), 0);
   });
+
+  it('skips paused streams', async () => {
+    const invokeContract = mock.fn();
+    const client = {
+      readContract: mockReadContract([
+        1,
+        [{ status: ['Paused'], end_ledger: 100 }],
+        200,
+      ]),
+      invokeContract,
+    };
+
+    const watcher = new StreamWatcher(client, 'C...');
+    await watcher.poll();
+
+    assert.strictEqual(invokeContract.mock.callCount(), 0);
+  });
 });

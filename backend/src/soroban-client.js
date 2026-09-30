@@ -15,7 +15,7 @@ export class SorobanClient {
     const source = Keypair.random();
     const acc = new Account(source.publicKey(), '0');
     const tx = new TransactionBuilder(acc, {
-      fee: '100',
+      fee: null,
       networkPassphrase: this.networkPassphrase,
     })
       .addOperation(op)
@@ -32,6 +32,7 @@ export class SorobanClient {
   }
 
   scvU64(val) { return xdr.ScVal.scvU64(BigInt(val)); }
+  scvU32(val) { return xdr.ScVal.scvU32(Number(val)); }
   scvAddress(addr) {
     return Address.fromString(addr).toScVal();
   }
@@ -62,4 +63,5 @@ const STATUS_ORDINALS = {
   Completed: 1,
   Exhausted: 1,
   Cancelled: 2,
+  Paused: 3,
 };

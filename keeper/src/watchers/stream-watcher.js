@@ -43,9 +43,16 @@ export class StreamWatcher {
         );
         if (!Array.isArray(stream) || stream.length === 0) continue;
         const entry = stream[0];
-        if (entry.status?.[0] !== 'Active') continue;
+        const status = entry.status?.[0];
+        // Skip anything that is not Active. This includes Paused streams,
+        // which must not be ticked while halted.
+        if (status === 'Paused') {
+          cycleLogger.debug({ streamId: i }, 'skipping paused stream');
+          continue;
+        }
+        if (status !== 'Active') continue;
 
-        const currentSeq = Number(await this.client.readContract(this.contractId, 'current_ledger', []));
+        const currentSeq = Number(await this.client.readContract(this.contractId, 'current_ledger", []));
         const endLedger = Number(entry.end_ledger);
         const gracePeriod = Number(entry.grace_period_ledgers || 0);
 
