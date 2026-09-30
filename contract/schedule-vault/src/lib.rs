@@ -16,6 +16,7 @@ pub enum DataKey {
     Vault(u64),
     Counter,
     VaultsByOwner(Address),
+    VaultsByRecipient(Address),
 }
 
 #[contracttype]
@@ -118,6 +119,19 @@ impl ScheduleVault {
         env.storage()
             .persistent()
             .extend_ttl(&DataKey::VaultsByOwner(owner), 6_312_000, 6_312_000);
+
+        let mut recipient_vaults: Vec<u64> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::VaultsByRecipient(recipient.clone()))
+            .unwrap_or(Vec::new(&env));
+        recipient_vaults.push_back(id);
+        env.storage()
+            .persistent()
+            .set(&DataKey::VaultsByRecipient(recipient.clone()), &recipient_vaults);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::VaultsByRecipient(recipient), 6_312_000, 6_312_000);
 
         env.storage().instance().extend_ttl(100_000, 100_000);
 
@@ -301,6 +315,13 @@ impl ScheduleVault {
         env.storage()
             .persistent()
             .get(&DataKey::VaultsByOwner(owner))
+            .unwrap_or(Vec::new(&env))
+    }
+
+    pub fn get_vaults_by_recipient(env: Env, recipient: Address) -> Vec<u64> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::VaultsByRecipient(recipient))
             .unwrap_or(Vec::new(&env))
     }
 
@@ -494,7 +515,7 @@ mod test {
     }
 
     #[test]
-    fn test_get_vaults_by_owner() {
+    fn test_get_vaults_by_owner_and_recipient() {
         let (env, contract_id, owner, recipient, token) = setup_test();
         let vault_client = ScheduleVaultClient::new(&env, &contract_id);
 
@@ -512,6 +533,10 @@ mod test {
 
         let vaults = vault_client.get_vaults_by_owner(&owner);
         assert_eq!(vaults.len(), 3);
+
+        let recipient_vaults = vault_client.get_vaults_by_recipient(&recipient);
+        assert_eq!(recipient_vaults.len(), 3);
+        assert_eq!(vaults, recipient_vaults);
     }
 
     #[test]
