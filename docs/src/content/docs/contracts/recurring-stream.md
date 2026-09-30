@@ -10,6 +10,9 @@ RecurringStream lets you stream tokens to a recipient over time. The recipient c
 - `*Salaries**`: Stream payroll continuously
 - `*Subscriptions**` : Pay for services by the second
 - `*Royalties**`: Auto-distribute revenue share
+- -**Salaries**: Stream payroll continuously
+- -**Subscriptions**: Pay for services by the second
+- -**Royalties**: Auto-distribute revenue share
 
 ## Vesting Math
 
@@ -28,6 +31,14 @@ When a stream is paused, accrual is computed over active intervals only. The pau
 - `Paused`: Halted; no tokens accrue and the keeper skips it
 - `Completed`: End ledger reached and all tokens claimed
 - `Cancelled`: Stream terminated early
+## Cliff Period
+
+A stream can optionally be created with a cliff (start delay). The cliff is specified in ledgers via `start_delay_ledgers` and is stored as `start_ledger = current_ledger + start_delay_ledgers`. No tokens accrue before `start_ledger`. This is useful for:
+
+- -**Trial periods**: Subscriptions that only begin accruing after a trial
+- -**Delayed salaries**: Streams that should not start until a start date
+
+A `zero` delay reproduces the current behaviour exactly. Total duration is still calculated as `end_ledger - start_ledger`, so the drip rate is unchanged by the cliff.
 
 ## Interface
 
@@ -41,14 +52,16 @@ fn create_stream(
     token: Address,
     total_amount: i128,
     duration_ledgers: u32,
+    start_delay_ledgers: u32,
     label: String,
 ) -> u64
 ```
 
-Creates a new stream. Transfers `total_amount` from owner to the contract.
+Creates a new stream. Transfers `total_amount` from owner to the contract. The stream begins accruing at `start_ledger = current_ledger + start_delay_ledgers`.
 
 - Minimum duration: 60 ledgers (~5 minutes)
 - `total_amount` must be positive
+- `start_delay_ledgers` may be zero (no cliff)
 
 ### `claim`
 
@@ -56,7 +69,7 @@ Creates a new stream. Transfers `total_amount` from owner to the contract.
 fn claim(env: Env, stream_id: u64) -> i129
 ```
 
-Claims the currently vested amount for the recipient. Returns the amount claimed.
+Claims the currently vested amount for the recipient. Returns the amount claimed. Claiming before the cliff (`current_ledger < start_ledger`) fails with a clear error rather than returning nothing to claim.
 
 ### `tick`
 
@@ -108,3 +121,4 @@ cargo test -p recurring-stream
 ```
 
 All tests must pass, including a property-style test asserting total vested never exceeds `total_amount` across a pause/resume cycle.
+All tests must pass, including tests for pre-cliff claim rejection and a post-cliff partial claim.
