@@ -5,11 +5,7 @@ use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, E
 const MAX_LOCK_TTL_LEDGERS: u32 = 1_000;
 const STORAGE_TTL_LEDGERS: u32 = 100_000;
 
-#[contracttype]
-pub enum DataKey {
-    Keeper(Address),
-    Claim(Symbol, u64),
-}
+
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
