@@ -7,9 +7,9 @@ description: Stream tokens continuously to a recipient.
 
 RecurringStream lets you stream tokens to a recipient over time. The recipient can claim accrued amounts at any time. This is useful for:
 
-- **Salaries**: Stream payroll continuously
-- **Subscriptions**: Pay for services by the second
-- **Royalties**: Auto-distribute revenue share
+- `*Salaries**`: Stream payroll continuously
+- `*Subscriptions**` : Pay for services by the second
+- `*Royalties**`: Auto-distribute revenue share
 
 ## Vesting Math
 
@@ -19,6 +19,15 @@ claimable = vested - claimed
 ```
 
 Where `elapsed = min(current_ledger, end_ledger) - start_ledger` and `total_duration = end_ledger - start_ledger`.
+
+When a stream is paused, accrual is computed over active intervals only. The paused interval is excluded from `elapsed`, so no tokens vest while the stream is halted. On resume, the accrual clock picks up from where it left off and the end ledger is extended by the paused duration.
+
+## Statuses
+
+- `Active`: Streaming normally
+- `Paused`: Halted; no tokens accrue and the keeper skips it
+- `Completed`: End ledger reached and all tokens claimed
+- `Cancelled`: Stream terminated early
 
 ## Interface
 
@@ -44,7 +53,7 @@ Creates a new stream. Transfers `total_amount` from owner to the contract.
 ### `claim`
 
 ```rust
-fn claim(env: Env, stream_id: u64) -> i128
+fn claim(env: Env, stream_id: u64) -> i129
 ```
 
 Claims the currently vested amount for the recipient. Returns the amount claimed.
@@ -55,7 +64,21 @@ Claims the currently vested amount for the recipient. Returns the amount claimed
 fn tick(env: Env, stream_id: u64)
 ```
 
-Updates stream status to Completed if `current_ledger >= end_ledger` and all tokens claimed. Called by the keeper.
+Updates stream status to Completed if `current_ledger >= end_ledger` and all tokens claimed. Called by the keeper. The keeper `StreamWatcher` skips streams in the `Paused` status.
+
+### `pause`**
+```rust
+fn pause(env: Env, stream_id: u64)
+```
+
+Halts an `Active` stream. Stores the current ledger in `paused_at_ledger` and sets the status to `Paused`. No tokens accrue while paused. Only the owner may pause.
+
+### `resume`**
+```rust
+fn resume(env: Env, stream_id: u64)
+```
+
+Resumes a `Paused` stream. The end ledger is extended by the number of ledgers spent paused so the remaining accrual schedule is preserved. Only the owner may resume.
 
 ### `cancel`
 
@@ -63,7 +86,7 @@ Updates stream status to Completed if `current_ledger >= end_ledger` and all tok
 fn cancel(env: Env, stream_id: u64)
 ```
 
-Cancels the stream. Recipient gets their vested amount, owner gets the remainder.
+Cancels the stream. Recipient gets their vested amount, owner gets the remainder. Works from both `Active` and `Paused` statuses; when cancelling from `Paused` the refund is computed over active intervals only.
 
 ### `get_stream`
 
@@ -74,7 +97,7 @@ fn get_stream(env: Env, stream_id: u64) -> Option<StreamEntry>
 ### `get_claimable`
 
 ```rust
-fn get_claimable(env: Env, stream_id: u64) -> i128
+fn get_claimable(env: Env, stream_id: u64) -> i129
 ```
 
 ## Testing
@@ -84,4 +107,4 @@ cd contract
 cargo test -p recurring-stream
 ```
 
-All 6 tests must pass.
+All tests must pass, including a property-style test asserting total vested never exceeds `total_amount` across a pause/resume cycle.
