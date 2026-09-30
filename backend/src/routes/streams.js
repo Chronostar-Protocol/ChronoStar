@@ -43,5 +43,44 @@ export function createDCARouter(client, contractId) {
     }
   });
 
+  router.get('/:address/:id/history', addressRouteLimiter, validateStellarAddress, async (req, res, next) => {
+    try {
+      const address = req.params.address;
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id) || id < 1) {
+        return res.status(400).json({ error: 'Invalid DCA id. Must be a positive integer.' });
+      }
+
+      const dcaIds = await client.readContract(contractId, 'get_dcas_by_owner', [client.scvAddress(address)]);
+      if (!dcaIds || !dcaIds.some(ownerId => Number(ownerId) === id)) {
+        return res.status(404).json({ error: 'DCA policy not found.' });
+      }
+
+      const start = parsePositiveInt(req.query.start, 1);
+      const limit = Math.min(parsePositiveInt(req.query.limit, 50), 50);
+
+      const records = await client.readContract(contractId, 'get_execution_history', [
+        client.scvU64(id),
+        client.scvU32(start),
+        client.scvU32(limit),
+      ]);
+
+      res.json({
+        dcaId: id,
+        start,
+        limit,
+        executions: records || [],
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
+
   return router;
+}
+
+function parsePositiveInt(value, fallback) {
+  const parsed = parseInt(value, 10);
+  if (!Number.isInteger(parsed) || parsed < 1) return fallback;
+  return parsed;
 }
