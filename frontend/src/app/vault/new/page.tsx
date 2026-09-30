@@ -52,7 +52,7 @@ export default function CreateVaultPage() {
         <Field testid="token-address" label="Token Address" value={token} onChange={setToken} placeholder="C..." />
         <Field testid="amount" label="Amount" type="number" value={amount} onChange={setAmount} placeholder="1000000" />
         <Field testid="release-ledger" label="Release Ledger" type="number" value={releaseLedger} onChange={setReleaseLedger} placeholder="e.g. 2000000" />
-        <Field testid="label" label="Label" value={label} onChange={setLabel} placeholder="My vault" maxLength={64} />
+        <Field testid="label" label="Label" value={label} onChange={setLabel} placeholder="My vault" maxLength={64} showCounter />
         <button
           type="submit"
           disabled={txStatus === 'pending'}
@@ -67,12 +67,17 @@ export default function CreateVaultPage() {
   );
 }
 
-function Field({ label, type = 'text', value, onChange, placeholder, maxLength, testid }: {
-  label: string; type?: string; value: string; onChange: (v: string) => void; placeholder?: string; maxLength?: number; testid?: string;
+function Field({ label, type = 'text', value, onChange, placeholder, maxLength, testid, showCounter }: {
+  label: string; type?: string; value: string; onChange: (v: string) => void; placeholder?: string; maxLength?: number; testid?: string; showCounter?: boolean;
 }) {
   return (
     <div>
-      <label className="block text-sm text-text-muted mb-1">{label}</label>
+      <div className="flex justify-between mb-1">
+        <label className="block text-sm text-text-muted">{label}</label>
+        {showCounter && maxLength && (
+          <span className="text-xs text-text-muted">{value.length}/{maxLength}</span>
+        )}
+      </div>
       <input
         data-testid={testid}
         type={type}
