@@ -64,7 +64,8 @@ impl StreamEntry {
     }
 }
 
-
+#[contract]
+pub struct RecurringStream;
 
 #[contractimpl]
 impl RecurringStream {
@@ -316,6 +317,7 @@ extern crate std;
 #[cfg(test)]
 mod test {
     use super::*;
+    use proptest::prelude::*;
     use soroban_sdk::{
         testutils::{Address as _, Ledger, LedgerInfo},
         token::{StellarAssetClient as TokenAdminClient, TokenClient},
@@ -528,5 +530,212 @@ mod test {
 
         let stream = stream_client.get_stream(&stream_id).unwrap();
         assert_eq!(stream.status, StreamStatus::Completed);
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(100))]
+
+        #[test]
+        fn prop_monotonicity(
+            total_amount in prop_oneof![1..100i128, 100..10_000i128, 10_000..10_000_000_000i128],
+            start_ledger in 0..=100_000u32,
+            duration in 1..=100_000u32,
+            claimed_amount_ratio in 0..=100u32,
+            ledger_a in 0..=300_000u32,
+            ledger_b in 0..=300_000u32,
+        ) {
+            let (la, lb) = if ledger_a <= ledger_b {
+                (ledger_a, ledger_b)
+            } else {
+                (ledger_b, ledger_a)
+            };
+
+            let end_ledger = start_ledger + duration;
+            let claimed_amount = (total_amount * claimed_amount_ratio as i128) / 100;
+            let last_claimed_ledger = start_ledger;
+
+            let stream = StreamEntry {
+                id: 1,
+                owner: Address::generate(&Env::default()),
+                recipient: Address::generate(&Env::default()),
+                token: Address::generate(&Env::default()),
+                total_amount,
+                claimed_amount,
+                start_ledger,
+                end_ledger,
+                last_claimed_ledger,
+                created_ledger: start_ledger,
+                label: String::from_str(&Env::default(), "prop"),
+                status: StreamStatus::Active,
+            };
+
+            let claimable_a = stream.claimable_amount(la);
+            let claimable_b = stream.claimable_amount(lb);
+
+            prop_assert!(
+                claimable_a <= claimable_b,
+                "Monotonicity failed: at ledger {} claimable is {}, but at later ledger {} claimable is {}",
+                la, claimable_a, lb, claimable_b
+            );
+        }
+
+        #[test]
+        fn prop_cumulative_claims_bounded(
+            total_amount in prop_oneof![1..100i128, 100..10_000i128, 10_000..10_000_000_000i128],
+            duration in 60..=10_000u32,
+            raw_offsets in prop::collection::vec(0..=15_000u32, 1..=15),
+        ) {
+            let (env, contract_id, owner, recipient, token) = setup_test();
+            let stream_client = RecurringStreamClient::new(&env, &contract_id);
+
+            let stream_id = stream_client.create_stream(
+                &owner,
+                &recipient,
+                &token,
+                &total_amount,
+                &duration,
+                &String::from_str(&env, "prop test"),
+            );
+
+            let start_ledger = 1000u32;
+            let mut offsets = raw_offsets;
+            offsets.sort_unstable();
+
+            let mut cumulative_claimed = 0i128;
+
+            for offset in offsets {
+                let current_ledger = start_ledger + offset;
+                env.ledger().set(LedgerInfo {
+                    protocol_version: 22,
+                    sequence_number: current_ledger,
+                    timestamp: 0,
+                    network_id: [0u8; 32],
+                    base_reserve: 0,
+                    min_persistent_entry_ttl: 1000,
+                    min_temp_entry_ttl: 1000,
+                    max_entry_ttl: 6_312_000,
+                });
+
+                let claimable = stream_client.get_claimable(&stream_id);
+                let stream = stream_client.get_stream(&stream_id).unwrap();
+
+                if stream.status == StreamStatus::Active && claimable > 0 {
+                    let claimed = stream_client.claim(&stream_id);
+                    cumulative_claimed += claimed;
+
+                    let updated_stream = stream_client.get_stream(&stream_id).unwrap();
+
+                    prop_assert!(
+                        cumulative_claimed <= total_amount,
+                        "Cumulative claimed {} exceeded total_amount {}",
+                        cumulative_claimed, total_amount
+                    );
+                    prop_assert!(
+                        updated_stream.claimed_amount <= total_amount,
+                        "Stream claimed_amount {} exceeded total_amount {}",
+                        updated_stream.claimed_amount, total_amount
+                    );
+                    prop_assert_eq!(
+                        updated_stream.claimed_amount, cumulative_claimed,
+                        "Stream claimed_amount {} mismatch with cumulative_claimed {}",
+                        updated_stream.claimed_amount, cumulative_claimed
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn prop_cancel_claims_plus_refund_equals_total(
+            total_amount in prop_oneof![1..100i128, 100..10_000i128, 10_000..10_000_000_000i128],
+            duration in 60..=10_000u32,
+            claim_offsets in prop::collection::vec(0..=15_000u32, 0..=10),
+            cancel_offset in 0..=20_000u32,
+        ) {
+            let (env, contract_id, owner, recipient, token) = setup_test();
+            let stream_client = RecurringStreamClient::new(&env, &contract_id);
+            let token_client = TokenClient::new(&env, &token);
+
+            let initial_owner_balance = token_client.balance(&owner);
+            let initial_recipient_balance = token_client.balance(&recipient);
+
+            let stream_id = stream_client.create_stream(
+                &owner,
+                &recipient,
+                &token,
+                &total_amount,
+                &duration,
+                &String::from_str(&env, "prop test cancel"),
+            );
+
+            let start_ledger = 1000u32;
+            let mut sorted_offsets = claim_offsets;
+            sorted_offsets.sort_unstable();
+
+            let cancel_ledger = start_ledger + cancel_offset;
+
+            for offset in sorted_offsets {
+                let current_ledger = start_ledger + offset;
+                if current_ledger >= cancel_ledger {
+                    break;
+                }
+                env.ledger().set(LedgerInfo {
+                    protocol_version: 22,
+                    sequence_number: current_ledger,
+                    timestamp: 0,
+                    network_id: [0u8; 32],
+                    base_reserve: 0,
+                    min_persistent_entry_ttl: 1000,
+                    min_temp_entry_ttl: 1000,
+                    max_entry_ttl: 6_312_000,
+                });
+
+                let claimable = stream_client.get_claimable(&stream_id);
+                let stream = stream_client.get_stream(&stream_id).unwrap();
+
+                if stream.status == StreamStatus::Active && claimable > 0 {
+                    stream_client.claim(&stream_id);
+                }
+            }
+
+            env.ledger().set(LedgerInfo {
+                protocol_version: 22,
+                sequence_number: cancel_ledger,
+                timestamp: 0,
+                network_id: [0u8; 32],
+                base_reserve: 0,
+                min_persistent_entry_ttl: 1000,
+                min_temp_entry_ttl: 1000,
+                max_entry_ttl: 6_312_000,
+            });
+
+            let stream_before_cancel = stream_client.get_stream(&stream_id).unwrap();
+
+            if stream_before_cancel.status == StreamStatus::Active {
+                let owner_bal_before_cancel = token_client.balance(&owner);
+
+                stream_client.cancel(&stream_id);
+
+                let stream_after_cancel = stream_client.get_stream(&stream_id).unwrap();
+                prop_assert_eq!(stream_after_cancel.status, StreamStatus::Cancelled);
+
+                let recipient_total_claimed = token_client.balance(&recipient) - initial_recipient_balance;
+                let owner_refund = token_client.balance(&owner) - owner_bal_before_cancel;
+
+                prop_assert_eq!(
+                    recipient_total_claimed + owner_refund,
+                    total_amount,
+                    "Conservation failed: claims ({}) + refund ({}) != total_amount ({})",
+                    recipient_total_claimed, owner_refund, total_amount
+                );
+
+                let owner_final_balance = token_client.balance(&owner);
+                prop_assert_eq!(
+                    initial_owner_balance - owner_final_balance,
+                    recipient_total_claimed,
+                    "Net owner outflow ({}) does not match recipient claims ({})",
+                    initial_owner_balance - owner_final_balance, recipient_total_claimed
+                );
+            }
+        }
     }
 }
