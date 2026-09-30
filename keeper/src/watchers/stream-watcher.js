@@ -1,5 +1,6 @@
 import { xdr } from '@stellar/stellar-sdk';
 import { logger, generateCorrelationId } from '../logger.js';
+import { runCoordinated } from '../coordination.js';
 
 export class StreamWatcher {
   constructor(sorobanClient, contractId, parentLogger = logger) {
@@ -58,12 +59,12 @@ export class StreamWatcher {
 
         if (currentSeq >= endLedger + gracePeriod) {
           cycleLogger.info({ streamId: i }, 'ticking completed stream');
-          await this.client.invokeContract(
+          await runCoordinated(this.client, 'stream', i, () => this.client.invokeContract(
             this.contractId,
             'tick',
             [xdr.ScVal.scvU64(BigInt(i))],
             correlationId,
-          );
+          ));
         }
       }
     } catch (err) {

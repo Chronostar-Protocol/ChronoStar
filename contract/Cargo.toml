@@ -3,6 +3,7 @@ members = [
   "schedule-vault",
   "recurring-stream",
   "dca-policy",
+  "keeper-coordinator",
 ]
 resolver = "2"
 
