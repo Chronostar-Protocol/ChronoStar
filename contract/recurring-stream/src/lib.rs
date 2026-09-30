@@ -288,6 +288,19 @@ impl RecurringStream {
         stream.claimable_amount(env.ledger().sequence())
     }
 
+    pub fn get_claimables(env: Env, stream_ids: Vec<u64>) -> Vec<i128> {
+        let mut results = Vec::new(&env);
+        let sequence = env.ledger().sequence();
+        for id in stream_ids {
+            let claimable = match env.storage().persistent().get::<_, StreamEntry>(&DataKey::Stream(id)) {
+                Some(stream) => stream.claimable_amount(sequence),
+                None => 0,
+            };
+            results.push_back(claimable);
+        }
+        results
+    }
+
     pub fn get_streams_by_owner(env: Env, owner: Address) -> Vec<u64> {
         env.storage()
             .persistent()
@@ -529,5 +542,59 @@ mod test {
 
         let stream = stream_client.get_stream(&stream_id).unwrap();
         assert_eq!(stream.status, StreamStatus::Completed);
+    }
+
+    #[test]
+    fn test_get_claimables() {
+        let (env, contract_id, owner, recipient, token) = setup_test();
+        let stream_client = RecurringStreamClient::new(&env, &contract_id);
+
+        // 1. Active stream
+        let stream1_id = stream_client.create_stream(
+            &owner,
+            &recipient,
+            &token,
+            &1_000_000,
+            &1000,
+            &String::from_str(&env, "Active stream"),
+        );
+
+        // 2. Completed stream
+        let stream2_id = stream_client.create_stream(
+            &owner,
+            &recipient,
+            &token,
+            &1_000_000,
+            &1000,
+            &String::from_str(&env, "Completed stream"),
+        );
+
+        env.ledger().set(LedgerInfo {
+            protocol_version: 22,
+            sequence_number: 2500,
+            timestamp: 0,
+            network_id: [0u8; 32],
+            base_reserve: 0,
+            min_persistent_entry_ttl: 1000,
+            min_temp_entry_ttl: 1000,
+            max_entry_ttl: 6_312_000,
+        });
+
+        stream_client.claim(&stream2_id);
+
+        // 3. Unknown ID
+        let unknown_id = 999;
+
+        let mut ids = soroban_sdk::Vec::new(&env);
+        ids.push_back(stream1_id);
+        ids.push_back(stream2_id);
+        ids.push_back(unknown_id);
+
+        let claimables = stream_client.get_claimables(&ids);
+
+        assert_eq!(claimables.len(), 3);
+        assert_eq!(claimables.get(0).unwrap(), 1_000_000); // stream1 is active and sequence is past end, so full amount
+        assert_eq!(claimables.get(1).unwrap(), 0);         // stream2 is completed, so 0 claimable
+        assert_eq!(claimables.get(2).unwrap(), 0);         // unknown yields 0
     }
 }

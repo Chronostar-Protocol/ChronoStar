@@ -88,6 +88,9 @@ export default function StreamDetailPage() {
         <DetailRow label="Recipient" value={stream.recipient} />
         <DetailRow label="Total Amount" value={stream.total_amount} />
         <DetailRow label="Claimed" value={stream.claimed_amount} />
+        {stream.status === 'Active' && stream.claimable_amount && (
+          <DetailRow label="Claimable Now" value={stream.claimable_amount} />
+        )}
         <DetailRow label="Progress" value={`${progress.toFixed(1)}%`} />
         <DetailRow label="End Ledger" value={String(stream.end_ledger)} />
         <DetailRow label="Status" value={stream.status} />
