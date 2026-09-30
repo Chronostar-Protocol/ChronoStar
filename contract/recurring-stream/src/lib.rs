@@ -43,6 +43,7 @@ pub struct StreamEntry {
     pub last_claimed_ledger: u32,
     pub created_ledger: u32,
     pub label: String,
+    pub grace_period_ledgers: u32,
     pub status: StreamStatus,
     // Ledger at which the stream was last paused. Zero when not paused.
     pub paused_at_ledger: u32,
@@ -114,6 +115,7 @@ impl RecurringStream {
         token: Address,
         total_amount: i128,
         duration_ledgers: u32,
+        grace_period_ledgers: u32,
         label: String,
         start_delay_ledgers: u32,
     ) -> u64 {
@@ -154,6 +156,7 @@ impl RecurringStream {
             last_claimed_ledger: start_ledger,
             created_ledger: current,
             label,
+            grace_period_ledgers,
             status: StreamStatus::Active,
             paused_at_ledger: 0,
             paused_ledgers: 0,
@@ -423,6 +426,20 @@ impl RecurringStream {
             env.events().publish(
                 (symbol_short!("completed"), stream_id),
                 stream.recipient.clone(),
+            );
+        } else if env.ledger().sequence() >= stream.end_ledger + stream.grace_period_ledgers {
+            let remainder = stream.total_amount - stream.claimed_amount;
+            if remainder > 0 {
+                let token_client = token::Client::new(&env, &stream.token);
+                token_client.transfer(&env.current_contract_address(), &stream.owner, &remainder);
+            }
+            stream.status = StreamStatus::Completed;
+            env.storage()
+                .persistent()
+                .set(&DataKey::Stream(stream_id), &stream);
+            env.events().publish(
+                (symbol_short!("expired"), stream_id),
+                stream.owner.clone(),
             );
         }
 
@@ -773,6 +790,7 @@ mod test {
             &token,
             &1_000_000,
             &1440,
+            &100,
             &String::from_str(&env, "Test stream"),
             &0,
         );
@@ -799,6 +817,7 @@ mod test {
             &token,
             &1_000_000,
             &1000,
+            &100,
             &String::from_str(&env, "Test stream"),
             &0,
         );
@@ -986,6 +1005,7 @@ mod test {
             &token,
             &\n_000_000,
             &1000,
+            &100,
             &String::from_str(&env, "Claim after resume"),
         );
 
@@ -1099,6 +1119,8 @@ mod test {
             &recipient,
             &token,
             &1_000_000,
+            &1000,
+            &100,
             &1440,
             &String::from_str(&env, "Test stream"),
         );
@@ -1123,6 +1145,8 @@ mod test {
             &token,
             &\n_000_000,
             &1000,
+            &100,
+            &String::from_str(&env, "Test stream"),
             &String::from_str(&env, "Paused claim"),
         );
 
@@ -1176,6 +1200,8 @@ mod test {
             &token,
             &1_000_000,
             &1000,
+            &100,
+            &String::from_str(&env, "Test stream"),
             &String::from_str(&env, "Active stream"),
         );
 
@@ -1320,6 +1346,90 @@ mod test {
             &1000,
             &String::from_str(&env, "Test invalid"),
         );
+    }
+
+    #[test]
+    fn test_tick_expires_after_grace_period() {
+        let (env, contract_id, owner, recipient, token) = setup_test();
+        let stream_client = RecurringStreamClient::new(&env, &contract_id);
+
+        let stream_id = stream_client.create_stream(
+            &owner,
+            &recipient,
+            &token,
+            &1_000_000,
+            &1000,
+            &100,
+            &String::from_str(&env, "Test stream"),
+        );
+
+        env.ledger().set(LedgerInfo {
+            protocol_version: 22,
+            sequence_number: 1500,
+            timestamp: 0,
+            network_id: [0u8; 32],
+            base_reserve: 0,
+            min_persistent_entry_ttl: 1000,
+            min_temp_entry_ttl: 1000,
+            max_entry_ttl: 6_312_000,
+        });
+
+        stream_client.claim(&stream_id);
+
+        env.ledger().set(LedgerInfo {
+            protocol_version: 22,
+            sequence_number: 2101,
+            timestamp: 0,
+            network_id: [0u8; 32],
+            base_reserve: 0,
+            min_persistent_entry_ttl: 1000,
+            min_temp_entry_ttl: 1000,
+            max_entry_ttl: 6_312_000,
+        });
+
+        stream_client.tick(&stream_id);
+
+        let stream = stream_client.get_stream(&stream_id).unwrap();
+        assert_eq!(stream.status, StreamStatus::Completed);
+        assert_eq!(stream.claimed_amount, 500_000);
+    }
+
+    #[test]
+    fn test_tick_expires_claim_nothing() {
+        let (env, contract_id, owner, recipient, token) = setup_test();
+        let stream_client = RecurringStreamClient::new(&env, &contract_id);
+
+        let stream_id = stream_client.create_stream(
+            &owner,
+            &recipient,
+            &token,
+            &1_000_000,
+            &1000,
+            &100,
+            &String::from_str(&env, "Test stream"),
+        );
+
+        env.ledger().set(LedgerInfo {
+            protocol_version: 22,
+            sequence_number: 2101,
+            timestamp: 0,
+            network_id: [0u8; 32],
+            base_reserve: 0,
+            min_persistent_entry_ttl: 1000,
+            min_temp_entry_ttl: 1000,
+            max_entry_ttl: 6_312_000,
+        });
+
+        stream_client.tick(&stream_id);
+
+        let stream = stream_client.get_stream(&stream_id).unwrap();
+        assert_eq!(stream.status, StreamStatus::Completed);
+        assert_eq!(stream.claimed_amount, 0);
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            stream_client.claim(&stream_id);
+        }));
+        assert!(result.is_err());
     }
 }
 

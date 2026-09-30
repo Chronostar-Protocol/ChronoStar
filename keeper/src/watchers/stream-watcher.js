@@ -54,8 +54,9 @@ export class StreamWatcher {
 
         const currentSeq = Number(await this.client.readContract(this.contractId, 'current_ledger", []));
         const endLedger = Number(entry.end_ledger);
+        const gracePeriod = Number(entry.grace_period_ledgers || 0);
 
-        if (currentSeq >= endLedger) {
+        if (currentSeq >= endLedger + gracePeriod) {
           cycleLogger.info({ streamId: i }, 'ticking completed stream');
           await this.client.invokeContract(
             this.contractId,
