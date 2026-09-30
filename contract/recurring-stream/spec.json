@@ -2,6 +2,42 @@
   "contract": "recurring-stream",
   "source": "generated with scripts/generate-contract-specs.sh",
   "metadata": { "name": "ChronoStar Recurring Stream", "version": "0.1.0" },
+  "statuses": ["Active", "Paused", "Cancelled", "Completed"],
+  "entrypoints": {
+    "init": { "args": ["payer", "recipient", "token", "total_amount", "start_ledger", "end_ledger"], "returns": "stream_id" },
+    "claim": { "args": ["stream_id"], "returns": "claimable_amount" },
+    "pause": { "args": ["stream_id"], "returns": "void", "guard": "status == Active" },
+    "resume": { "args": ["stream_id"], "returns": "void", "guard": "status == Paused" },
+    "cancel": { "args": ["stream_id"], "returns": "refund_amount", "guard": "status in [Active, Paused]" }
+  },
+  "storage": {
+    "streams": { "type": "map<u32> -> StreamRecord>" }
+  },
+  "types": {
+    "StreamRecord": {
+      "fields": {
+        "payer": "address",
+        "recipient": "address",
+        "token": "address",
+        "total_amount": "i128",
+        "claimed": "i128",
+        "start_ledger": "u32",
+        "end_ledger": "u32",
+        "paused_at_ledger": "option<u32>",
+        "paused_duration": "u32",
+        "status": "Status"
+      }
+    }
+  },
+  "accrual": {
+    "description": "Vested amount is computed over active intervals only; paused ledgers do not accrue.",
+    "formula": "vested(current_ledger) = total_amount * effective_elapsed / (end_ledger - start_ledger - paused_duration)",
+    "effective_elapsed": "min(current_ledger, end_ledger) - start_ledger - paused_duration - (if status == Paused then current_ledger - paused_at_ledger else 0)",
+    "invariant": "claimed + claimable <= total_amount across pause/resume cycles"
+  },
+  "keeper": {
+    "StreamWatcher": { "skips_statuses": ["Paused", "Cancelled", "Completed"] }
+  }
   "functions": [
     {
       "name": "create_stream",
