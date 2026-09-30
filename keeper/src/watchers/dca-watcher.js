@@ -1,6 +1,7 @@
 import { xdr } from '@stellar/stellar-sdk';
 import { logger, generateCorrelationId } from '../logger.js';
 import { withJitter } from '../poll-jitter.js';
+import { runCoordinated } from '../coordination.js';
 
 export class DCAWatcher {
   constructor(sorobanClient, contractId, parentLogger = logger) {
@@ -45,6 +46,9 @@ export class DCAWatcher {
       if (!dcaCount) return;
 
       const numDcas = Number(dcaCount);
+      const currentSeq = Number(
+        await this.client.readContract(this.contractId, 'current_ledger', []),
+      );
       for (let i = 1; i <= numDcas; i++) {
         const dca = await this.client.readContract(
           this.contractId,
@@ -55,17 +59,16 @@ export class DCAWatcher {
         const entry = dca[0];
         if (entry.status?.[0] !== 'Active') continue;
 
-        const currentSeq = Number(await this.client.readContract(this.contractId, 'current_ledger', []));
         const nextExec = Number(entry.next_execution_ledger);
 
         if (currentSeq >= nextExec) {
           cycleLogger.info({ dcaId: i }, 'executing DCA swap');
-          await this.client.invokeContract(
+          await runCoordinated(this.client, 'dca', i, () => this.client.invokeContract(
             this.contractId,
             'execute_swap',
             [xdr.ScVal.scvU64(BigInt(i))],
             correlationId,
-          );
+          ));
         }
       }
     } catch (err) {

@@ -1,6 +1,7 @@
 import { xdr } from '@stellar/stellar-sdk';
 import { logger, generateCorrelationId } from '../logger.js';
 import { withJitter } from '../poll-jitter.js';
+import { runCoordinated } from '../coordination.js';
 
 export class VaultWatcher {
   constructor(sorobanClient, contractId, parentLogger = logger) {
@@ -66,12 +67,12 @@ export class VaultWatcher {
         const currentSeq = Number(currentLedger);
         if (currentSeq >= releaseLedger) {
           cycleLogger.info({ vaultId: i }, 'releasing vault');
-          await this.client.invokeContract(
+          await runCoordinated(this.client, 'vault', i, () => this.client.invokeContract(
             this.contractId,
             'release',
             [xdr.ScVal.scvU64(BigInt(i))],
             correlationId,
-          );
+          ));
         }
       }
     } catch (err) {

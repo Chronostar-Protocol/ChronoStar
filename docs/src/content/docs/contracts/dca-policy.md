@@ -61,6 +61,40 @@ Cancels the DCA policy. Returns remaining budget to the owner.
 fn get_dca(env: Env, dca_id: u64) -> Option<DCAEntry>
 ```
 
+### `get_execution_history`
+
+```rust
+fn get_execution_history(env: Env, dca_id: u64, start: u32, limit: u32) -> Vec<ExecutionRecord>
+```
+
+Returns recorded executions for a policy, oldest first. `start` is a 1-based index into
+the execution sequence, and `limit` is clamped to 50 records per call.
+
+Each successful `execute_swap` writes one record:
+
+```rust
+struct ExecutionRecord {
+    index: u32,                  // 1-based, matches executions_completed at write time
+    dca_id: u64,
+    ledger: u32,                 // ledger the swap executed on
+    amount_in: i128,
+    amount_out: i128,
+    remaining_budget: i128,      // budget left after this swap
+    next_execution_ledger: u32,
+    swapped: bool,               // true when a router swap ran, false for a plain transfer
+}
+```
+
+Records persist across `cancel`, so history stays readable after a policy is stopped.
+
+### `get_execution_count`
+
+```rust
+fn get_execution_count(env: Env, dca_id: u64) -> u32
+```
+
+Number of executions recorded for a policy.
+
 ## States
 
 | Status | Meaning |
@@ -69,6 +103,14 @@ fn get_dca(env: Env, dca_id: u64) -> Option<DCAEntry>
 | `Exhausted` | All swaps executed, budget fully spent |
 | `Cancelled` | Cancelled by owner, remaining budget returned |
 
+## Events
+
+Every event uses two topics: the event name and the DCA ID.
+
+- `created` — published by `create_dca` and `create_dca_swap`. Data is `DCACreated { owner, next_execution_ledger }`.
+- `swap` — published by `execute_swap`. Data is the running execution count.
+- `cancelled` — published by `cancel`. Data is the owner address.
+
 ## Testing
 
 ```bash
@@ -76,4 +118,5 @@ cd contract
 cargo test -p dca-policy
 ```
 
-All 5 tests must pass.
+All 7 tests must pass.
+All tests must pass, including the execution history coverage.

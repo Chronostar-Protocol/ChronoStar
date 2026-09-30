@@ -6,9 +6,7 @@ export function createEventsRouter(clients, logger, store) {
 
   router.get('/', eventsLimiter, async (req, res, next) => {
     const correlationId = req.id;
-    if (logger) {
-      logger.info({ correlationId }, 'events request received');
-    }
+    
     try {
       const events = [];
 

@@ -7,7 +7,9 @@ import { api } from '@/lib/api';
 import { useWallet } from '@/lib/store';
 import { TxToast } from '@/components/TxToast';
 import { DetailPageSkeleton } from '@/components/Skeleton';
-import type { DCAEntry } from '@/types';
+import type { DCAEntry, DCAExecution } from '@/types';
+
+const HISTORY_PAGE_SIZE = 10;
 
 export default function DCADetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -16,6 +18,9 @@ export default function DCADetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [txStatus, setTxStatus] = useState<null | 'pending' | 'success' | 'error'>(null);
+  const [history, setHistory] = useState<DCAExecution[]>([]);
+  const [historyPage, setHistoryPage] = useState(1);
+  const [historyError, setHistoryError] = useState<string | null>(null);
 
   const fetchDCA = useCallback(() => {
     if (!address) return;
@@ -34,6 +39,28 @@ export default function DCADetailPage() {
   useEffect(() => {
     fetchDCA();
   }, [fetchDCA]);
+
+  useEffect(() => {
+    if (!address || !id) return;
+    let cancelled = false;
+    setHistoryError(null);
+
+    api
+      .getDCAHistory(address, Number(id), (historyPage - 1) * HISTORY_PAGE_SIZE + 1, HISTORY_PAGE_SIZE)
+      .then(res => {
+        if (!cancelled) setHistory(res.executions || []);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setHistory([]);
+          setHistoryError('Failed to load execution history.');
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [address, id, historyPage]);
 
   if (loading) {
     return <DetailPageSkeleton />;
@@ -94,6 +121,15 @@ export default function DCADetailPage() {
         <DetailRow label="Status" value={dca.status} />
       </div>
 
+      <ExecutionHistory
+        executions={history}
+        total={completed}
+        page={historyPage}
+        pageSize={HISTORY_PAGE_SIZE}
+        error={historyError}
+        onPageChange={setHistoryPage}
+      />
+
       {dca.status === 'Active' && (
         <button
           onClick={() => setTxStatus('pending')}
@@ -105,6 +141,97 @@ export default function DCADetailPage() {
 
       <TxToast status={txStatus} onClose={() => setTxStatus(null)} />
     </div>
+  );
+}
+
+function ExecutionHistory({
+  executions,
+  total,
+  page,
+  pageSize,
+  error,
+  onPageChange,
+}: {
+  executions: DCAExecution[];
+  total: number;
+  page: number;
+  pageSize: number;
+  error: string | null;
+  onPageChange: (page: number) => void;
+}) {
+  const pageCount = Math.ceil(total / pageSize);
+
+  return (
+    <section className="mt-6">
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-sm font-heading font-bold text-text-primary">Execution History</h2>
+        {pageCount > 1 && (
+          <span className="text-xs text-text-muted font-mono">
+            Page {page} of {pageCount}
+          </span>
+        )}
+      </div>
+
+      {error && <p className="text-sm text-accent-red mb-3">{error}</p>}
+
+      {!error && executions.length === 0 && (
+        <p className="text-sm text-text-muted py-4 text-center border border-border rounded-lg bg-bg-card">
+          No executions recorded yet.
+        </p>
+      )}
+
+      {executions.length > 0 && (
+        <div className="border border-border rounded-lg overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-bg-elevated">
+              <tr className="text-left text-text-muted">
+                <th className="px-3 py-2 font-medium">#</th>
+                <th className="px-3 py-2 font-medium">Ledger</th>
+                <th className="px-3 py-2 font-medium text-right">In</th>
+                <th className="px-3 py-2 font-medium text-right">Out</th>
+                <th className="px-3 py-2 font-medium text-right">Remaining</th>
+              </tr>
+            </thead>
+            <tbody>
+              {executions.map(record => (
+                <tr key={record.index} className="border-t border-border">
+                  <td className="px-3 py-2 font-mono text-text-primary">{record.index}</td>
+                  <td className="px-3 py-2 font-mono text-text-muted">{record.ledger}</td>
+                  <td className="px-3 py-2 font-mono text-text-primary text-right">
+                    {record.amount_in}
+                  </td>
+                  <td className="px-3 py-2 font-mono text-text-primary text-right">
+                    {record.amount_out}
+                  </td>
+                  <td className="px-3 py-2 font-mono text-text-muted text-right">
+                    {record.remaining_budget}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {pageCount > 1 && (
+        <div className="flex justify-between items-center mt-3">
+          <button
+            onClick={() => onPageChange(page - 1)}
+            disabled={page <= 1}
+            className="px-3 py-1.5 rounded-lg border border-border text-sm text-text-muted hover:text-text-primary transition-colors disabled:opacity-40 disabled:hover:text-text-muted"
+          >
+            &larr; Newer
+          </button>
+          <button
+            onClick={() => onPageChange(page + 1)}
+            disabled={page >= pageCount}
+            className="px-3 py-1.5 rounded-lg border border-border text-sm text-text-muted hover:text-text-primary transition-colors disabled:opacity-40 disabled:hover:text-text-muted"
+          >
+            Older &rarr;
+          </button>
+        </div>
+      )}
+    </section>
   );
 }
 

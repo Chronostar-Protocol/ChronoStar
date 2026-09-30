@@ -34,7 +34,7 @@ export default function CreateStreamPage() {
         <Field label="Token Address" value={token} onChange={setToken} placeholder="C..." />
         <Field label="Total Amount" type="number" value={totalAmount} onChange={setTotalAmount} placeholder="1000000" />
         <Field label="Duration (ledgers)" type="number" value={duration} onChange={setDuration} placeholder="e.g. 1440 (~2 hrs)" />
-        <Field label="Label" value={label} onChange={setLabel} placeholder="Salary stream" maxLength={64} />
+        <Field label="Label" value={label} onChange={setLabel} placeholder="Salary stream" maxLength={64} showCounter />
         <button
           type="submit"
           className="w-full py-3 rounded-lg bg-accent-green text-white font-medium hover:opacity-90 transition-opacity"
@@ -47,12 +47,17 @@ export default function CreateStreamPage() {
   );
 }
 
-function Field({ label, type = 'text', value, onChange, placeholder, maxLength }: {
-  label: string; type?: string; value: string; onChange: (v: string) => void; placeholder?: string; maxLength?: number;
+function Field({ label, type = 'text', value, onChange, placeholder, maxLength, showCounter }: {
+  label: string; type?: string; value: string; onChange: (v: string) => void; placeholder?: string; maxLength?: number; showCounter?: boolean;
 }) {
   return (
     <div>
-      <label className="block text-sm text-text-muted mb-1">{label}</label>
+      <div className="flex justify-between mb-1">
+        <label className="block text-sm text-text-muted">{label}</label>
+        {showCounter && maxLength && (
+          <span className="text-xs text-text-muted">{value.length}/{maxLength}</span>
+        )}
+      </div>
       <input
         type={type}
         value={value}

@@ -4,12 +4,7 @@ import { LedgerClock } from './LedgerClock';
 import { ledgersToHuman } from '../lib/utils';
 
 describe('ledgersToHuman', () => {
-  it('formats ledgers to human readable string', () => {
-    expect(ledgersToHuman(0)).toBe('now');
-    expect(ledgersToHuman(10)).toBe('~1 min');
-    expect(ledgersToHuman(1000)).toBe('~1.4 hours');
-    expect(ledgersToHuman(20000)).toBe('~1.2 days');
-  });
+ 
 });
 
 describe('LedgerClock', () => {

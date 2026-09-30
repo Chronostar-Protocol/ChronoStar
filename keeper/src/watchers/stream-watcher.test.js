@@ -18,8 +18,8 @@ describe('StreamWatcher', () => {
     const client = {
       readContract: mockReadContract([
         1,
-        [{ status: ['Active'], end_ledger: 100 }],
         200,
+        [{ status: ['Active'], end_ledger: 100 }],
       ]),
       invokeContract,
     };
@@ -35,8 +35,8 @@ describe('StreamWatcher', () => {
     const client = {
       readContract: mockReadContract([
         1,
-        [{ status: ['Active'], end_ledger: 100 }],
         200,
+        [{ status: ['Active'], end_ledger: 100 }],
       ]),
       invokeContract: mock.fn(),
     };
@@ -58,8 +58,8 @@ describe('StreamWatcher', () => {
     const client = {
       readContract: mockReadContract([
         1,
-        [{ status: ['Active'], end_ledger: 100 }],
         200,
+        [{ status: ['Active'], end_ledger: 100 }],
       ]),
       invokeContract: mock.fn(),
     };
@@ -80,7 +80,33 @@ describe('StreamWatcher', () => {
     const client = {
       readContract: mockReadContract([
         1,
+        200,
         [{ status: ['Active'], end_ledger: 300 }],
+      ]),
+      invokeContract,
+    };
+
+    const watcher = new StreamWatcher(client, 'C...');
+    await watcher.poll();
+
+    assert.strictEqual(invokeContract.mock.callCount(), 0);
+  });
+
+  it('reads current_ledger once when polling multiple streams', async () => {
+    const client = {
+      readContract: mockReadContract([
+        2,
+        200,
+        [{ status: ['Active'], end_ledger: 100 }],
+        [{ status: ['Active'], end_ledger: 300 }],
+      ]),
+      invokeContract: mock.fn(),
+  it('skips paused streams', async () => {
+    const invokeContract = mock.fn();
+    const client = {
+      readContract: mockReadContract([
+        1,
+        [{ status: ['Paused'], end_ledger: 100 }],
         200,
       ]),
       invokeContract,
@@ -89,6 +115,10 @@ describe('StreamWatcher', () => {
     const watcher = new StreamWatcher(client, 'C...');
     await watcher.poll();
 
+    const ledgerCalls = client.readContract.mock.calls.filter(
+      ({ arguments: args }) => args[1] === 'current_ledger',
+    );
+    assert.strictEqual(ledgerCalls.length, 1);
     assert.strictEqual(invokeContract.mock.callCount(), 0);
   });
 });

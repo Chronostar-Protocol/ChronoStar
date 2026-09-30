@@ -394,6 +394,28 @@
                     },
                     {
                       "key": {
+                        "symbol": "last_swap_output"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 100000
+                        }
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "min_output_per_swap"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 0
+                        }
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "next_execution_ledger"
                       },
                       "val": {
@@ -418,6 +440,12 @@
                           "lo": 900000
                         }
                       }
+                    },
+                    {
+                      "key": {
+                        "symbol": "router"
+                      },
+                      "val": "void"
                     },
                     {
                       "key": {
@@ -446,6 +474,12 @@
                       "val": {
                         "address": "CCABDO7UZXYE4W6GVSEGSNNZTKSLFQGKXXQTH6OX7M7GKZ4Z6CUJNGZN"
                       }
+                    },
+                    {
+                      "key": {
+                        "symbol": "token_out"
+                      },
+                      "val": "void"
                     },
                     {
                       "key": {
