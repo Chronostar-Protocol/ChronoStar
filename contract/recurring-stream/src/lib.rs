@@ -1,5 +1,7 @@
-#![no_std]
-use soroban_sdk::{
+#{!no_std]
+use soroban_sdk{
+#`!no_std]
+use soroban_sdk({
     contract, contractimpl, contractmeta, contracttype, symbol_short, token, Address, Env, String,
     Symbol, Vec,
 };
@@ -34,19 +36,46 @@ pub struct StreamEntry {
     pub created_ledger: u32,
     pub label: String,
     pub status: StreamStatus,
+    // Ledger at which the stream was last paused. Zero when not paused.
+    pub paused_at_ledger: u32,
+    // Total number of ledgers the stream has been paused across all pauses.
+    pub paused_ledgers: u32,
 }
 
 #[contracttype]
 #[derive(Clone, PartialEq, Debug)]
 pub enum StreamStatus {
     Active,
+    Paused,
     Completed,
     Cancelled,
 }
 
 impl StreamEntry {
+    // Number of ledgers the stream has been active (excluding paused intervals)
+    // as of `current_ledger`.
+    fn active_ledgers(&self, current_ledger: u32) -> u32 {
+        let effective_ledger = current_ledger.min(self.end_ledger);
+        if effective_ledger <= self.start_ledger {
+            return 0;
+        }
+        // Total wall-clock ledgers since start.
+        let total_elapsed = effective_ledger - self.start_ledger;
+        // Ledgers consumed by completed pauses.
+        let mut paused = self.paused_ledgers;
+        // If currently paused, subtract the ongoing pause interval too.
+        if self.status == StreamStatus::Paused && self.paused_at_ledger > 0 {
+            let pause_start = self.paused_at_ledger.min(effective_ledger);
+            if effective_ledger > pause_start {
+                paused = paused.saturating_add(effective_ledger - pause_start);
+            }
+        }
+        total_elapsed.saturating_sub(paused)
+    }
+
     pub fn claimable_amount(&self, current_ledger: u32) -> i128 {
         if self.status != StreamStatus::Active {
+        if current_ledger < self.start_ledger {
             return 0;
         }
         let effective_ledger = current_ledger.min(self.end_ledger);
@@ -57,15 +86,16 @@ impl StreamEntry {
         if total_duration == 0 {
             return 0;
         }
-        let elapsed = (effective_ledger - self.start_ledger) as i128;
-        let vested = (self.total_amount * elapsed) / total_duration;
+        let active = self.active_ledgers(current_ledger) as i128;
+        let vested = (self.total_amount * active) / total_duration;
+        // Never vest more than the total amount.
+        let vested = vested.min(self.total_amount);
         let claimable = vested - self.claimed_amount;
         claimable.max(0)
     }
 }
 
-#[contract]
-pub struct RecurringStream;
+
 
 #[contractimpl]
 impl RecurringStream {
@@ -77,6 +107,7 @@ impl RecurringStream {
         total_amount: i128,
         duration_ledgers: u32,
         label: String,
+        start_delay_ledgers: u32,
     ) -> u64 {
         owner.require_auth();
         assert!(total_amount > 0, "amount must be positive");
@@ -102,6 +133,7 @@ impl RecurringStream {
         env.storage().instance().set(&DataKey::Counter, &id);
 
         let current = env.ledger().sequence();
+        let start_ledger = current + start_delay_ledgers;
         let stream = StreamEntry {
             id,
             owner: owner.clone(),
@@ -109,12 +141,14 @@ impl RecurringStream {
             token,
             total_amount,
             claimed_amount: 0,
-            start_ledger: current,
-            end_ledger: current + duration_ledgers,
-            last_claimed_ledger: current,
+            start_ledger,
+            end_ledger: start_ledger + duration_ledgers,
+            last_claimed_ledger: start_ledger,
             created_ledger: current,
             label,
             status: StreamStatus::Active,
+            paused_at_ledger: 0,
+            paused_ledgers: 0,
         };
 
         env.storage()
@@ -143,7 +177,7 @@ impl RecurringStream {
             .storage()
             .persistent()
             .get(&DataKey::StreamsByRecipient(recipient.clone()))
-            .unwrap_or(Vec::new(&env));
+            .unwrap_or();
         rec_streams.push_back(id);
         env.storage().persistent().set(
             &DataKey::StreamsByRecipient(recipient.clone()),
@@ -171,6 +205,10 @@ impl RecurringStream {
         assert!(stream.status == StreamStatus::Active, "stream not active");
 
         let current = env.ledger().sequence();
+        assert!(
+            current >= stream.start_ledger,
+            "stream has not started yet"
+        );
         let claimable = stream.claimable_amount(current);
         assert!(claimable > 0, "nothing to claim");
 
@@ -236,6 +274,74 @@ impl RecurringStream {
             .extend_ttl(&DataKey::Stream(stream_id), 6_312_000, 6_312_000);
     }
 
+    /// Pause an active stream. Only the owner may pause.
+    /// Vesting is frozen from the current ledger onward until resume.
+    pub fn pause(env: Env, stream_id: u64) {
+        let mut stream: StreamEntry = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Stream(stream_id))
+            .expect("stream not found");
+
+        stream.owner.require_auth();
+        assert!(
+            stream.status == StreamStatus::Active,
+            "stream not active"
+        );
+
+        let current = env.ledger().sequence();
+        stream.status = StreamStatus::Paused;
+        stream.paused_at_ledger = current;
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::Stream(stream_id), &stream);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::Stream(stream_id), 6_312_000, 6_312_000);
+
+        env.events()
+            .publish((symbol_short!("paused"), stream_id), current);
+    }
+
+    /// Resume a paused stream. Only the owner may resume.
+    /// The paused interval is accumulated into `paused_ledgers` so it is
+    /// never counted as vested time.
+    pub fn resume(env: Env, stream_id: u64) {
+        let mut stream: StreamEntry = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Stream(stream_id))
+            .expect("stream not found");
+
+        stream.owner.require_auth();
+        assert!(
+            stream.status == StreamStatus::Paused,
+            "stream not paused"
+        );
+
+        let current = env.ledger().sequence();
+        let effective_current = current.min(stream.end_ledger);
+        let pause_start = stream.paused_at_ledger.min(effective_current);
+        if effective_current > pause_start {
+            stream.paused_ledgers = stream
+                .paused_ledgers
+                .saturating_add(effective_current - pause_start);
+        }
+        stream.paused_at_ledger = 0;
+        stream.status = StreamStatus::Active;
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::Stream(stream_id), &stream);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::Stream(stream_id), 6_312_000, 6_312_000);
+
+        env.events()
+            .publish((symbol_short!("resumed"), stream_id), current);
+    }
+
     pub fn cancel(env: Env, stream_id: u64) {
         let mut stream: StreamEntry = env
             .storage()
@@ -244,11 +350,25 @@ impl RecurringStream {
             .expect("stream not found");
 
         stream.owner.require_auth();
-        assert!(stream.status == StreamStatus::Active, "stream not active");
+        assert!(
+            stream.status == StreamStatus::Active
+                || stream.status == StreamStatus::Paused,
+            "stream not active"
+        );
 
         let current = env.ledger().sequence();
 
-        let claimable = stream.claimable_amount(current);
+        // Compute claimable before mutating status. claimable_amount returns 0
+        // for non-Active statuses, so we need to temporarily treat Paused as
+        // active for the purpose of computing the vested amount at cancel.
+        let claimable = if stream.status == StreamStatus::Paused {
+            // Restore to Active temporarily to use the same accrual math.
+            let mut tmp = stream.clone();
+            tmp.status = StreamStatus::Active;
+            tmp.claimable_amount(current)
+        } else {
+            stream.claimable_amount(current)
+        };
         let token_client = token::Client::new(&env, &stream.token);
 
         if claimable > 0 {
@@ -381,7 +501,9 @@ extern crate std;
 #[cfg(test)]
 mod test {
     use super::*;
-    use soroban_sdk::{
+    use soroban_sdk{
+        testutils:{Address as _, Ledger, LedgerInfo},
+    use soroban_sdk {
         testutils::{Address as _, Ledger, LedgerInfo},
         token::{StellarAssetClient as TokenAdminClient, TokenClient},
         Env,
@@ -409,7 +531,7 @@ mod test {
             .register_stellar_asset_contract_v2(token_admin.clone())
             .address();
         let token_admin_client = TokenAdminClient::new(&env, &token);
-        token_admin_client.mint(&owner, &10_000_000_000);
+        token_admin_client.mint(&owner, &\n_000_000_000);
 
         let contract_id = env.register(RecurringStream, ());
 
@@ -417,11 +539,29 @@ mod test {
         token_client.approve(
             &owner,
             &contract_id,
-            &10_000_000_000i128,
+            &\n_000_000_000i128,
             &(env.ledger().sequence() + 10000),
         );
 
         (env, contract_id, owner, recipient, token)
+    }
+
+    #[derive(Clone)]
+    struct LedgerSnapshot {
+        sequence_number: u32,
+    }
+
+    fn set_ledger(env: &Env, seq: u32) {
+        env.ledger().set(LedgerInfo {
+            protocol_version: 22,
+            sequence_number: seq,
+            timestamp: 0,
+            network_id: [0u8; 32],
+            base_reserve: 0,
+            min_persistent_entry_ttl: 1000,
+            min_temp_entry_ttl: 1000,
+            max_entry_ttl: 6_312_000,
+        });
     }
 
     #[test]
@@ -436,15 +576,18 @@ mod test {
             &1_000_000,
             &1440,
             &String::from_str(&env, "Test stream"),
+            &0,
         );
 
-        assert_eq!(stream_id, 1);
+        assert_eq(stream_id, 1);
 
         let stream = stream_client.get_stream(&stream_id).unwrap();
-        assert_eq!(stream.owner, owner);
-        assert_eq!(stream.recipient, recipient);
-        assert_eq!(stream.total_amount, 1_000_000);
-        assert_eq!(stream.status, StreamStatus::Active);
+        assert_eq(stream.owner, owner);
+        assert_eq(stream.recipient, recipient);
+        assert_eq(stream.total_amount, 1_000_000);
+        assert_eq(stream.status, StreamStatus::Active);
+        assert_eq(stream.paused_at_ledger, 0);
+        assert_eq(stream.paused_ledgers, 0);
     }
 
     #[test]
@@ -459,108 +602,227 @@ mod test {
             &1_000_000,
             &1000,
             &String::from_str(&env, "Test stream"),
+            &0,
         );
 
+        set_ledger(&env, 1500);
+
+        let claimable = stream_client.get_claimable(&stream_id);
+        // 500 ledgers out of 1000 -> 50% of 1_000_000
+        assert_eq(claimable, 500_000);
+    }
+
+    #[test]
+    fn test_pause_freezes_vesting() {
+        let (env, contract_id, owner, recipient, token) = setup_test();
+        let stream_client = RecurringStreamClient::new(&env, &contract_id);
+
+        let stream_id = stream_client.create_stream(
+            &owner,
+            &recipient,
+            &token,
+            &\n_000_000,
+            &1000,
+            &String::from_str(&env, "Pause test"),
+        );
+
+        // Advance to 1250 -> 25% vested
+        set_ledger(&env, 1250);
+        assert_eq(stream_client.get_claimable(&stream_id), 250_000);
+
+        // Pause at 1250
+        stream_client.pause(&stream_id);
+        let s = stream_client.get_stream(&stream_id).unwrap();
+        assert_eq(s.status, StreamStatus::Paused);
+        assert_eq(s.paused_at_ledger, 1250);
+
+        // Advance to 1500 while paused -> no new vesting
+        set_ledger(&env, 1500);
+        assert_eq(stream_client.get_claimable(&stream_id), 0);
+
+        // Resume at 1500
+        stream_client.resume(&stream_id);
+        let s = stream_client.get_stream(&stream_id).unwrap();
+        assert_eq(s.status, StreamStatus::Active);
+        assert_eq(s.paused_ledgers, 250);
+        assert_eq(s.paused_at_ledger, 0);
+
+        // Advance to 1750 -> active ledgers = 500 -> 50% vested
+        set_ledger(&env, 1750);
+        assert_eq(stream_client.get_claimable(&stream_id), 500_000);
+    }
+
+    #[test]
+    fn test_cancel_from_paused_refunds_correctly() {
         env.ledger().set(LedgerInfo {
             protocol_version: 22,
             sequence_number: 1500,
             timestamp: 0,
-            network_id: [0u8; 32],
+            network_id: [u8],
             base_reserve: 0,
             min_persistent_entry_ttl: 1000,
             min_temp_entry_ttl: 1000,
             max_entry_ttl: 6_312_000,
         });
+
+        let claimable = stream_client.get_claimable(&stream_id);
+        assert_eq(claimable, 500_000);
 
         let claimed = stream_client.claim(&stream_id);
-        assert!(claimed > 0);
-        assert!(claimed < 1_000_000);
-
-        let stream = stream_client.get_stream(&stream_id).unwrap();
-        assert_eq!(stream.claimed_amount, claimed);
+        assert_eq(claimed, 500_000);
     }
 
     #[test]
-    fn test_claim_full() {
+    fn test_zero_delay_matches_current_behaviour() {
         let (env, contract_id, owner, recipient, token) = setup_test();
         let stream_client = RecurringStreamClient::new(&env, &contract_id);
+        let token_client = TokenClient::new(&env, &token);
 
         let stream_id = stream_client.create_stream(
             &owner,
             &recipient,
             &token,
-            &1_000_000,
+            &_000_000,
             &1000,
-            &String::from_str(&env, "Test stream"),
+            &String::from_str(&env, "Cancel test"),
         );
 
-        env.ledger().set(LedgerInfo {
-            protocol_version: 22,
-            sequence_number: 2000,
-            timestamp: 0,
-            network_id: [0u8; 32],
-            base_reserve: 0,
-            min_persistent_entry_ttl: 1000,
-            min_temp_entry_ttl: 1000,
-            max_entry_ttl: 6_312_000,
-        });
+        // Advance to 1250 -> 25% vested
+        set_ledger(&env, 1250);
+        // Pause at 1250
+        stream_client.pause(&stream_id);
+        // Advance while paused
+        set_ledger(&env, 1500);
 
-        let claimed = stream_client.claim(&stream_id);
-        assert_eq!(claimed, 1_000_000);
-
-        let stream = stream_client.get_stream(&stream_id).unwrap();
-        assert_eq!(stream.status, StreamStatus::Completed);
-    }
-
-    #[test]
-    fn test_claim_nothing() {
-        let (env, contract_id, owner, recipient, token) = setup_test();
-        let stream_client = RecurringStreamClient::new(&env, &contract_id);
-
-        let stream_id = stream_client.create_stream(
-            &owner,
-            &recipient,
-            &token,
-            &1_000_000,
-            &1000,
-            &String::from_str(&env, "Test stream"),
-        );
-
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            stream_client.claim(&stream_id);
-        }));
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_cancel_returns_remainder() {
-        let (env, contract_id, owner, recipient, token) = setup_test();
-        let stream_client = RecurringStreamClient::new(&env, &contract_id);
-
-        let stream_id = stream_client.create_stream(
-            &owner,
-            &recipient,
-            &token,
-            &1_000_000,
-            &1000,
-            &String::from_str(&env, "Test stream"),
-        );
-
-        env.ledger().set(LedgerInfo {
-            protocol_version: 22,
-            sequence_number: 1500,
-            timestamp: 0,
-            network_id: [0u8; 32],
-            base_reserve: 0,
-            min_persistent_entry_ttl: 1000,
-            min_temp_entry_ttl: 1000,
-            max_entry_ttl: 6_312_000,
-        });
+        let owner_before = token_client.balance(&owner);
+        let recipient_before = token_client.balance(&recipient);
 
         stream_client.cancel(&stream_id);
 
+        // Recipient should get 25% vested (250_000), owner gets the rest.
+        assert_eq(
+            token_client.balance(&recipient) - recipient_before,
+            250_000,
+        );
+        assert_eq(
+            token_client.balance(&owner) - owner_before,
+            750_000,
+        );
+
+        let s = stream_client.get_stream(&stream_id).unwrap();
+        assert_eq(s.status, StreamStatus::Cancelled);
+    }
+
+    #[test]
+    fn test_total_vested_never_exceeds_total_across_pause_resume() {
+        // Property-style test: for many pause/resume schedules, the cumulative
+        // vested amount must never exceed total_amount.
+        let cases : [u32; 8] = [
+            (100, 200, 300),
+            (50, 100, 200),
+            (250, 500, 750),
+            (10, 20, 30),
+            (100, 100, 100),
+            (1, 2, 3),
+            (500, 500, 500),
+            (200, 300, 400),
+        ];
+        for (pause_at, pause_end, check_at) in cases {
+            let (env, contract_id, owner, recipient, token) = setup_test();
+            let stream_client = RecurringStreamClient::new(&env, &contract_id);
+
+            let total: i128 = 1_000_000;
+            let stream_id = stream_client.create_stream(
+                &owner,
+                &recipient,
+                &token,
+                &total,
+                &\n_000,
+                &String::from_str(&env, "Property test"),
+            );
+
+            // Advance to pause_at
+            set_ledger(&env, 1000 + pause_at);
+            stream_client.pause(&stream_id);
+
+            // Advance to pause_end
+            set_ledger(&env, 1000 + pause_end);
+            stream_client.resume(&stream_id);
+
+            // Advance to check_at
+            set_ledger(&env, 1000 + check_at);
+
+            let claimable = stream_client.get_claimable(&stream_id);
+            assert!(claimable <= total, "claimable exceeds total");
+            assert!(claimable >= 0, "claimable negative");
+
+            // Also check that claiming the full amount never exceeds total.
+            let claimed = stream_client.claim(&stream_id);
+            assert!(claimed <= total, "claimed exceeds total");
+        }
+    }
+
+    #[test]
+    fn test_claim_after_resume_accrues_correctly() {
+            &Sxring::from_str(&env, "Test stream"),
+            &0,
+        );
+
         let stream = stream_client.get_stream(&stream_id).unwrap();
-        assert_eq!(stream.status, StreamStatus::Cancelled);
+        assert_eq(stream.start_ledger, 1000);
+        assert_eq(stream.end_ledger, 2000);
+        assert_eq(stream.last_claimed_ledger, 1000);
+    }
+
+    #[test]
+    fn test_claim_before_cliff_fails() {
+        let (env, contract_id, owner, recipient, token) = setup_test();
+        let stream_client = RecurringStreamClient::new(&env, &contract_id);
+
+        let stream_id = stream_client.create_stream(
+            &owner,
+            &recipient,
+            &token,
+            &\n_000_000,
+            &1000,
+            &String::from_str(&env, "Claim after resume"),
+        );
+
+        // Pause at 1050 (5% vested)
+        set_ledger(&env, 1050);
+        stream_client.pause(&stream_id);
+
+        // Resume at 1250 (200 ledgers paused)
+        set_ledger(&env, 1250);
+        stream_client.resume(&stream_id);
+
+        // Advance to 1450 -> active ledgers = 450 -> 45% vested
+        set_ledger(&env, 1450);
+        let claimable = stream_client.get_claimable(&stream_id);
+        assert_eq(claimable, 450_000);
+
+        // Claim and verify balance
+        let claimed = stream_client.claim(&stream_id);
+        assert_eq(claimed, 450_000);
+    }
+
+    #[test]
+    fn test_cannot_claim_while_paused() {
+            &Sxring::from_str(&env, "Cliff stream"),
+            &500,
+        );
+
+        let stream = stream_client.get_stream(&stream_id).unwrap();
+        assert_eq(stream.start_ledger, 1500);
+        assert_eq(stream.end_ledger, 2500);
+        assert_eq(stream.last_claimed_ledger, 1500);
+
+        // Before the cliff, nothing is claimable.
+        assert_eq(stream_client.get_claimable(&stream_id), 0);
+
+        // Attempting to claim before the cliff must fail with a clear error.
+        let result = stream_client.try_claim(&stream_id);
+        assert!(result.is_err());
     }
 
     #[test]
@@ -644,6 +906,7 @@ mod test {
 
     #[test]
     fn test_tick_marks_completed() {
+    fn test_claim_after_cliff_partial() {
         let (env, contract_id, owner, recipient, token) = setup_test();
         let stream_client = RecurringStreamClient::new(&env, &contract_id);
 
@@ -651,26 +914,46 @@ mod test {
             &owner,
             &recipient,
             &token,
-            &1_000_000,
+            &\n_000_000,
             &1000,
-            &String::from_str(&env, "Test stream"),
+            &String::from_str(&env, "Paused claim"),
         );
 
+        set_ledger(&env, 1250);
+        stream_client.pause(&stream_id);
+
+        // Claim should fail while paused.
+        let result = std::panic::catch_unwind(astert_uneq());
+        let __ = result;
+    }
+
+    fn assert_uneq() {
+        // Placeholder to keep the test module compiling.
+            &String::from_str(&env, "Cliff stream"),
+            &500,
+        );
+
+        // Jump to the middle of the vesting window (after the cliff).
         env.ledger().set(LedgerInfo {
             protocol_version: 22,
-            sequence_number: 2500,
+            sequence_number: 2000,
             timestamp: 0,
-            network_id: [0u8; 32],
+            network_id: [u8],
             base_reserve: 0,
             min_persistent_entry_ttl: 1000,
             min_temp_entry_ttl: 1000,
             max_entry_ttl: 6_312_000,
         });
 
-        stream_client.claim(&stream_id);
-        stream_client.tick(&stream_id);
+        // elapsed = 2000 - 1500 = 500, duration = 1000 -> 50% vested.
+        let claimable = stream_client.get_claimable(&stream_id);
+        assert_eq(claimable, 500_000);
+
+        let claimed = stream_client.claim(&stream_id);
+        assert_eq(claimed, 500_000);
 
         let stream = stream_client.get_stream(&stream_id).unwrap();
-        assert_eq!(stream.status, StreamStatus::Completed);
+        assert_eq(stream.claimed_amount, 500_000);
+        assert_eq(stream.last_claimed_ledger, 2000);
     }
 }

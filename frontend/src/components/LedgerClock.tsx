@@ -5,7 +5,7 @@ import { useState, useEffect } from 'react';
 interface LedgerClockProps {
   targetLedger: number;
   currentLedger?: number;
-  secondsPerLedger?: number; // Configurable per-ledger duration
+  secondsPerLedger?: number; 
   className?: string;
 }
 
