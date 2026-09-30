@@ -4,6 +4,8 @@ use soroban_sdk::{
     Vec,
 };
 
+const MAX_LABEL_LEN: u32 = 64;
+
 contractmeta!(key = "name", val = "ChronoStar Schedule Vault");
 contractmeta!(key = "version", val = "0.1.0");
 contractmeta!(
@@ -75,6 +77,14 @@ impl ScheduleVault {
             release_ledger > env.ledger().sequence(),
             "release_ledger must be in the future"
         );
+        assert!(label.len() != 0, "label cannot be empty");
+        assert!(label.len() <= MAX_LABEL_LEN, "label max 64 chars");
+        let mut buf = [0u8; MAX_LABEL_LEN as usize];
+        label.copy_into_slice(&mut buf[..label.len() as usize]);
+        let all_ws = buf[..label.len() as usize]
+            .iter()
+            .all(|b| matches!(b, b' ' | b'\t' | b'\r' | b'\n'));
+        assert!(!all_ws, "label cannot be blank");
         assert!(label.len() <= 64, "label max 64 chars");
         if let Some(expiry) = expires_after_ledger {
             assert!(expiry > release_ledger, "expiry must be strictly greater than release_ledger");
@@ -829,5 +839,67 @@ mod test {
         let created = VaultCreated::try_from_val(&env, &data).unwrap();
         assert_eq!(created.owner, owner);
         assert_eq!(created.release_ledger, 2000);
+    }
+
+    #[test]
+    #[should_panic(expected = "label cannot be empty")]
+    fn test_label_empty() {
+        let (env, contract_id, owner, recipient, token) = setup_test();
+        let vault_client = ScheduleVaultClient::new(&env, &contract_id);
+        vault_client.create_vault(
+            &owner,
+            &recipient,
+            &token,
+            &1_000_000,
+            &2000,
+            &String::from_str(&env, ""),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "label cannot be blank")]
+    fn test_label_whitespace_only() {
+        let (env, contract_id, owner, recipient, token) = setup_test();
+        let vault_client = ScheduleVaultClient::new(&env, &contract_id);
+        vault_client.create_vault(
+            &owner,
+            &recipient,
+            &token,
+            &1_000_000,
+            &2000,
+            &String::from_str(&env, "   "),
+        );
+    }
+
+    #[test]
+    fn test_label_exactly_64() {
+        let (env, contract_id, owner, recipient, token) = setup_test();
+        let vault_client = ScheduleVaultClient::new(&env, &contract_id);
+        // 64 chars
+        let label = String::from_str(
+            &env,
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        );
+        let id = vault_client.create_vault(&owner, &recipient, &token, &1_000_000, &2000, &label);
+        assert_eq!(id, 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "label max 64 chars")]
+    fn test_label_65_chars() {
+        let (env, contract_id, owner, recipient, token) = setup_test();
+        let vault_client = ScheduleVaultClient::new(&env, &contract_id);
+        // 65 chars
+        vault_client.create_vault(
+            &owner,
+            &recipient,
+            &token,
+            &1_000_000,
+            &2000,
+            &String::from_str(
+                &env,
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            ),
+        );
     }
 }
