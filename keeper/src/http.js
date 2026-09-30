@@ -2,7 +2,7 @@ import http from 'node:http';
 import { config } from './config.js';
 import { logger } from './logger.js';
 
-export function createServer(watchers) {
+export function createServer(watchers, sorobanClient = null) {
   const server = http.createServer((req, res) => {
     res.setHeader('Content-Type', 'application/json');
 
@@ -23,6 +23,7 @@ export function createServer(watchers) {
         ),
         uptime: process.uptime(),
         memory: process.memoryUsage().rss,
+        rpcEndpoints: sorobanClient?.getRpcMetrics?.() ?? [],
       };
       res.writeHead(200);
       res.end(JSON.stringify(metrics));
