@@ -2,12 +2,7 @@
 
 import { useState, useEffect } from 'react';
 
-interface TxToastProps {
-  hash?: string | null;
-  status?: 'pending' | 'success' | 'error' | null;
-  message?: string;
-  onClose?: () => void;
-}
+
 
 export function TxToast({ hash, status, message, onClose }: TxToastProps) {
   const [visible, setVisible] = useState(false);
