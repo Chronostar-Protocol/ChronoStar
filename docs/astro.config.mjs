@@ -17,6 +17,7 @@ export default defineConfig({
           items: [
             { label: 'Overview', link: '/getting-started/overview/' },
             { label: 'Quickstart', link: '/getting-started/quickstart/' },
+            { label: 'CLI Migration Guide', link: '/getting-started/cli-migration/' },
           ],
         },
         {
