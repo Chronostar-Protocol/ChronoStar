@@ -33,6 +33,7 @@ Without `COORDINATOR_CONTRACT_ID`, watchers retain their current behavior. The l
 - Release fails: expiry restores liveness.
 - Duplicate polling by the lock owner: renewing the claim is allowed.
 - Unregistered keeper: claim fails until it registers itself.
+- Observability: operators can inspect live locks using `get_claim_count()`, `list_live_claims(resource, limit)`, and `get_next_expiry()`. Listing and scan operations are capped at `MAX_CLAIMS_SCAN_LIMIT` (`32` entries) so read-only calls remain bounded within the Soroban read budget.
 
 ## Compatibility and rollout
 
