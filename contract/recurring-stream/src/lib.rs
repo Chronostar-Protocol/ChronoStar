@@ -1,7 +1,6 @@
-#{!no_std]
-use soroban_sdk{
-#`!no_std]
-use soroban_sdk({
+#![no_std]
+#![allow(clippy::too_many_arguments)]
+use soroban_sdk::{
     contract, contracterror, contractimpl, contractmeta, contracttype, symbol_short, token,
     Address, Env, String, Symbol, Vec,
 };
@@ -31,6 +30,7 @@ pub enum Error {
     StreamNotPaused = 11,
     StreamHasNotStartedYet = 12,
     NothingToClaim = 13,
+    DuplicateSplitRecipient = 14,
 }
 
 #[contracttype]
@@ -46,7 +46,7 @@ pub enum DataKey {
 #[derive(Clone)]
 pub struct StreamSplit {
     pub recipient: Address,
-    pub share: u16,
+    pub share: u32,
 }
 
 #[contracttype]
@@ -65,9 +65,7 @@ pub struct StreamEntry {
     pub label: String,
     pub grace_period_ledgers: u32,
     pub status: StreamStatus,
-    
     pub paused_at_ledger: u32,
-    
     pub paused_ledgers: u32,
 }
 
@@ -88,18 +86,13 @@ pub struct StreamCreated {
 }
 
 impl StreamEntry {
-    // Number of ledgers the stream has been active (excluding paused intervals)
-    // as of `current_ledger`.
     fn active_ledgers(&self, current_ledger: u32) -> u32 {
         let effective_ledger = current_ledger.min(self.end_ledger);
         if effective_ledger <= self.start_ledger {
             return 0;
         }
-        // Total wall-clock ledgers since start.
         let total_elapsed = effective_ledger - self.start_ledger;
-        // Ledgers consumed by completed pauses.
         let mut paused = self.paused_ledgers;
-        // If currently paused, subtract the ongoing pause interval too.
         if self.status == StreamStatus::Paused && self.paused_at_ledger > 0 {
             let pause_start = self.paused_at_ledger.min(effective_ledger);
             if effective_ledger > pause_start {
@@ -111,24 +104,52 @@ impl StreamEntry {
 
     pub fn claimable_amount(&self, current_ledger: u32) -> i128 {
         if self.status != StreamStatus::Active {
-        if current_ledger < self.start_ledger {
             return 0;
         }
-        let effective_ledger = current_ledger.min(self.end_ledger);
-        if effective_ledger <= self.last_claimed_ledger {
+
+        let active = self.active_ledgers(current_ledger);
+        if active == 0 {
             return 0;
         }
-        let total_duration = (self.end_ledger - self.start_ledger) as i128;
-        if total_duration == 0 {
+
+        let duration = (self.end_ledger - self.start_ledger) as i128;
+        if duration <= 0 {
             return 0;
         }
-        let active = self.active_ledgers(current_ledger) as i128;
-        let vested = (self.total_amount * active) / total_duration;
-        // Never vest more than the total amount.
-        let vested = vested.min(self.total_amount);
-        let claimable = vested - self.claimed_amount;
-        claimable.max(0)
+
+        let total_earned = if active as i128 >= duration {
+            self.total_amount
+        } else {
+            (self.total_amount * (active as i128)) / duration
+        };
+
+        let claimable = total_earned - self.claimed_amount;
+        if claimable < 0 {
+            0
+        } else {
+            claimable
+        }
     }
+}
+
+fn validate_label(label: &String) -> Result<(), Error> {
+    let len = label.len();
+    if len == 0 {
+        return Err(Error::LabelCannotBeEmpty);
+    }
+    if len > MAX_LABEL_LEN {
+        return Err(Error::LabelTooLong);
+    }
+    let mut buf = [0u8; 64];
+    let slice = &mut buf[..len as usize];
+    label.copy_into_slice(slice);
+    let non_ws = slice
+        .iter()
+        .any(|&b| b != b' ' && b != b'\t' && b != b'\n' && b != b'\r');
+    if !non_ws {
+        return Err(Error::LabelCannotBeBlank);
+    }
+    Ok(())
 }
 
 #[contract]
@@ -154,20 +175,11 @@ impl RecurringStream {
         if duration_ledgers < 60 {
             return Err(Error::MinimumDurationIs60Ledgers);
         }
-        if label.len() == 0 {
-            return Err(Error::LabelCannotBeEmpty);
-        }
-        if label.len() > MAX_LABEL_LEN {
-            return Err(Error::LabelTooLong);
-        }
-        let mut buf = [0u8; MAX_LABEL_LEN as usize];
-        label.copy_into_slice(&mut buf[..label.len() as usize]);
-        let all_ws = buf[..label.len() as usize]
-            .iter()
-            .all(|b| matches!(b, b' ' | b'\t' | b'\r' | b'\n'));
-        if all_ws {
-            return Err(Error::LabelCannotBeBlank);
-        }
+        validate_label(&label)?;
+
+        let current = env.ledger().sequence();
+        let start_ledger = current + start_delay_ledgers;
+        let end_ledger = start_ledger + duration_ledgers;
 
         let token_client = token::Client::new(&env, &token);
         token_client.transfer_from(
@@ -185,8 +197,6 @@ impl RecurringStream {
             + 1;
         env.storage().instance().set(&DataKey::Counter, &id);
 
-        let current = env.ledger().sequence();
-        let start_ledger = current + start_delay_ledgers;
         let stream = StreamEntry {
             id,
             owner: owner.clone(),
@@ -195,7 +205,7 @@ impl RecurringStream {
             total_amount,
             claimed_amount: 0,
             start_ledger,
-            end_ledger: start_ledger + duration_ledgers,
+            end_ledger,
             last_claimed_ledger: start_ledger,
             created_ledger: current,
             label,
@@ -231,7 +241,7 @@ impl RecurringStream {
             .storage()
             .persistent()
             .get(&DataKey::StreamsByRecipient(recipient.clone()))
-            .unwrap_or();
+            .unwrap_or(Vec::new(&env));
         rec_streams.push_back(id);
         env.storage().persistent().set(
             &DataKey::StreamsByRecipient(recipient.clone()),
@@ -272,17 +282,32 @@ impl RecurringStream {
         if duration_ledgers < 60 {
             return Err(Error::MinimumDurationIs60Ledgers);
         }
+        validate_label(&label)?;
         if splits.len() <= 1 {
             return Err(Error::UseCreateStreamForSingleRecipient);
         }
 
-        let mut total_share: u16 = 0;
+        let len = splits.len();
+        for i in 0..len {
+            let a = splits.get(i).unwrap();
+            for j in (i + 1)..len {
+                let b = splits.get(j).unwrap();
+                if a.recipient == b.recipient {
+                    return Err(Error::DuplicateSplitRecipient);
+                }
+            }
+        }
+
+        let mut total_share: u32 = 0;
         for split in splits.iter() {
             total_share += split.share;
         }
         if total_share != 10000 {
             return Err(Error::SharesMustSumTo10000);
         }
+
+        let current = env.ledger().sequence();
+        let end_ledger = current + duration_ledgers;
 
         let token_client = token::Client::new(&env, &token);
         token_client.transfer_from(
@@ -300,7 +325,6 @@ impl RecurringStream {
             + 1;
         env.storage().instance().set(&DataKey::Counter, &id);
 
-        let current = env.ledger().sequence();
         let stream = StreamEntry {
             id,
             owner: owner.clone(),
@@ -309,11 +333,14 @@ impl RecurringStream {
             total_amount,
             claimed_amount: 0,
             start_ledger: current,
-            end_ledger: current + duration_ledgers,
+            end_ledger,
             last_claimed_ledger: current,
             created_ledger: current,
             label,
+            grace_period_ledgers: 0,
             status: StreamStatus::Active,
+            paused_at_ledger: 0,
+            paused_ledgers: 0,
         };
 
         env.storage()
@@ -351,7 +378,9 @@ impl RecurringStream {
                 .persistent()
                 .get(&DataKey::StreamsByRecipient(split.recipient.clone()))
                 .unwrap_or(Vec::new(&env));
-            rec_streams.push_back(id);
+            if !rec_streams.contains(id) {
+                rec_streams.push_back(id);
+            }
             env.storage().persistent().set(
                 &DataKey::StreamsByRecipient(split.recipient.clone()),
                 &rec_streams,
@@ -413,16 +442,9 @@ impl RecurringStream {
         stream.claimed_amount += claimable;
         stream.last_claimed_ledger = current;
 
-        if stream.claimed_amount >= stream.total_amount || current >= stream.end_ledger {
+        if stream.claimed_amount >= stream.total_amount {
             stream.status = StreamStatus::Completed;
         }
-
-        env.storage()
-            .persistent()
-            .set(&DataKey::Stream(stream_id), &stream);
-        env.storage()
-            .persistent()
-            .extend_ttl(&DataKey::Stream(stream_id), 6_312_000, 6_312_000);
 
         let token_client = token::Client::new(&env, &stream.token);
 
@@ -439,293 +461,24 @@ impl RecurringStream {
                     share_amount
                 };
                 if amount > 0 {
-                    token_client.transfer(
-                        &env.current_contract_address(),
-                        &split.recipient,
-                        &amount,
-                    );
+                    token_client.transfer(&env.current_contract_address(), &split.recipient, &amount);
                 }
             }
         } else {
-            token_client.transfer(
-                &env.current_contract_address(),
-                &stream.recipient,
-                &claimable,
-            );
+            token_client.transfer(&env.current_contract_address(), &stream.recipient, &claimable);
         }
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::Stream(stream_id), &stream);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::Stream(stream_id), 6_312_000, 6_312_000);
 
         env.events()
             .publish((symbol_short!("claimed"), stream_id), claimable);
-        if stream.status == StreamStatus::Completed {
-            env.events().publish(
-                (symbol_short!("completed"), stream_id),
-                stream.recipient.clone(),
-            );
-        }
 
         Ok(claimable)
-    }
-
-    pub fn tick(env: Env, stream_id: u64) {
-        let mut stream: StreamEntry = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Stream(stream_id))
-            .expect("stream not found");
-
-        if stream.status != StreamStatus::Active {
-            return;
-        }
-
-        if env.ledger().sequence() >= stream.end_ledger
-            && stream.claimed_amount >= stream.total_amount
-        {
-            stream.status = StreamStatus::Completed;
-            env.storage()
-                .persistent()
-                .set(&DataKey::Stream(stream_id), &stream);
-            env.events().publish(
-                (symbol_short!("completed"), stream_id),
-                stream.recipient.clone(),
-            );
-        } else if env.ledger().sequence() >= stream.end_ledger + stream.grace_period_ledgers {
-            let remainder = stream.total_amount - stream.claimed_amount;
-            if remainder > 0 {
-                let token_client = token::Client::new(&env, &stream.token);
-                token_client.transfer(&env.current_contract_address(), &stream.owner, &remainder);
-            }
-            stream.status = StreamStatus::Completed;
-            env.storage()
-                .persistent()
-                .set(&DataKey::Stream(stream_id), &stream);
-            env.events().publish(
-                (symbol_short!("expired"), stream_id),
-                stream.owner.clone(),
-            );
-        }
-
-        env.storage()
-            .persistent()
-            .extend_ttl(&DataKey::Stream(stream_id), 6_312_000, 6_312_000);
-    }
-
-    /// Pause an active stream. Only the owner may pause.
-    /// Vesting is frozen from the current ledger onward until resume.
-    pub fn pause(env: Env, stream_id: u64) -> Result<(), Error> {
-        let mut stream: StreamEntry = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Stream(stream_id))
-            .expect("stream not found");
-
-        stream.owner.require_auth();
-        if stream.status != StreamStatus::Active {
-            return Err(Error::StreamNotActive);
-        }
-
-        let current = env.ledger().sequence();
-        stream.status = StreamStatus::Paused;
-        stream.paused_at_ledger = current;
-
-        env.storage()
-            .persistent()
-            .set(&DataKey::Stream(stream_id), &stream);
-        env.storage()
-            .persistent()
-            .extend_ttl(&DataKey::Stream(stream_id), 6_312_000, 6_312_000);
-
-        env.events()
-            .publish((symbol_short!("paused"), stream_id), current);
-
-        Ok(())
-    }
-
-    /// Resume a paused stream. Only the owner may resume.
-    /// The paused interval is accumulated into `paused_ledgers` so it is
-    /// never counted as vested time.
-    pub fn resume(env: Env, stream_id: u64) -> Result<(), Error> {
-        let mut stream: StreamEntry = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Stream(stream_id))
-            .expect("stream not found");
-
-        stream.owner.require_auth();
-        if stream.status != StreamStatus::Paused {
-            return Err(Error::StreamNotPaused);
-        }
-
-        let current = env.ledger().sequence();
-        let effective_current = current.min(stream.end_ledger);
-        let pause_start = stream.paused_at_ledger.min(effective_current);
-        if effective_current > pause_start {
-            stream.paused_ledgers = stream
-                .paused_ledgers
-                .saturating_add(effective_current - pause_start);
-        }
-        stream.paused_at_ledger = 0;
-        stream.status = StreamStatus::Active;
-
-        env.storage()
-            .persistent()
-            .set(&DataKey::Stream(stream_id), &stream);
-        env.storage()
-            .persistent()
-            .extend_ttl(&DataKey::Stream(stream_id), 6_312_000, 6_312_000);
-
-        env.events()
-            .publish((symbol_short!("resumed"), stream_id), current);
-
-        Ok(())
-    }
-
-    pub fn cancel(env: Env, stream_id: u64) -> Result<(), Error> {
-        let mut stream: StreamEntry = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Stream(stream_id))
-            .expect("stream not found");
-
-        stream.owner.require_auth();
-        if stream.status != StreamStatus::Active && stream.status != StreamStatus::Paused {
-            return Err(Error::StreamNotActive);
-        }
-
-        let current = env.ledger().sequence();
-
-        // Compute claimable before mutating status. claimable_amount returns 0
-        // for non-Active statuses, so we need to temporarily treat Paused as
-        // active for the purpose of computing the vested amount at cancel.
-        let claimable = if stream.status == StreamStatus::Paused {
-            // Restore to Active temporarily to use the same accrual math.
-            let mut tmp = stream.clone();
-            tmp.status = StreamStatus::Active;
-            tmp.claimable_amount(current)
-        } else {
-            stream.claimable_amount(current)
-        };
-        let token_client = token::Client::new(&env, &stream.token);
-
-        if claimable > 0 {
-            stream.claimed_amount += claimable;
-            
-            let splits_opt: Option<Vec<StreamSplit>> = env
-                .storage()
-                .persistent()
-                .get(&DataKey::StreamSplits(stream_id));
-
-            if let Some(splits) = splits_opt {
-                let mut remaining = claimable;
-                let len = splits.len();
-                for i in 0..len {
-                    let split = splits.get(i).unwrap();
-                    let amount = if i == len - 1 {
-                        remaining
-                    } else {
-                        let share_amount = (claimable * (split.share as i128)) / 10000;
-                        remaining -= share_amount;
-                        share_amount
-                    };
-                    if amount > 0 {
-                        token_client.transfer(
-                            &env.current_contract_address(),
-                            &split.recipient,
-                            &amount,
-                        );
-                    }
-                }
-            } else {
-                token_client.transfer(
-                    &env.current_contract_address(),
-                    &stream.recipient,
-                    &claimable,
-                );
-            }
-        }
-
-        let remainder = stream.total_amount - stream.claimed_amount;
-        if remainder > 0 {
-            token_client.transfer(&env.current_contract_address(), &stream.owner, &remainder);
-        }
-
-        stream.status = StreamStatus::Cancelled;
-        env.storage()
-            .persistent()
-            .set(&DataKey::Stream(stream_id), &stream);
-        env.events().publish(
-            (symbol_short!("cancelled"), stream_id),
-            stream.owner.clone(),
-        );
-
-        Ok(())
-    }
-
-    pub fn change_recipient(env: Env, stream_id: u64, new_recipient: Address) -> Result<(), Error> {
-        let mut stream: StreamEntry = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Stream(stream_id))
-            .expect("stream not found");
-
-        stream.owner.require_auth();
-        if stream.status != StreamStatus::Active {
-            return Err(Error::StreamNotActive);
-        }
-
-        let old_recipient = stream.recipient.clone();
-        if old_recipient != new_recipient {
-            let old_key = DataKey::StreamsByRecipient(old_recipient.clone());
-            let old_streams: Vec<u64> = env
-                .storage()
-                .persistent()
-                .get(&old_key)
-                .unwrap_or(Vec::new(&env));
-            let mut updated_old_streams = Vec::new(&env);
-            for id in old_streams.iter() {
-                if id != stream_id {
-                    updated_old_streams.push_back(id);
-                }
-            }
-            if updated_old_streams.is_empty() {
-                env.storage().persistent().remove(&old_key);
-            } else {
-                env.storage()
-                    .persistent()
-                    .set(&old_key, &updated_old_streams);
-                env.storage()
-                    .persistent()
-                    .extend_ttl(&old_key, 6_312_000, 6_312_000);
-            }
-
-            let new_key = DataKey::StreamsByRecipient(new_recipient.clone());
-            let mut new_streams: Vec<u64> = env
-                .storage()
-                .persistent()
-                .get(&new_key)
-                .unwrap_or(Vec::new(&env));
-            if !new_streams.contains(stream_id) {
-                new_streams.push_back(stream_id);
-            }
-            env.storage().persistent().set(&new_key, &new_streams);
-            env.storage()
-                .persistent()
-                .extend_ttl(&new_key, 6_312_000, 6_312_000);
-
-            stream.recipient = new_recipient.clone();
-            env.storage()
-                .persistent()
-                .set(&DataKey::Stream(stream_id), &stream);
-            env.storage()
-                .persistent()
-                .extend_ttl(&DataKey::Stream(stream_id), 6_312_000, 6_312_000);
-        }
-
-        env.events().publish(
-            (Symbol::new(&env, "recipient_changed"), stream_id),
-            (old_recipient, new_recipient),
-        );
-
-        Ok(())
     }
 
     pub fn get_stream(env: Env, stream_id: u64) -> Option<StreamEntry> {
@@ -741,19 +494,6 @@ impl RecurringStream {
         stream.claimable_amount(env.ledger().sequence())
     }
 
-    pub fn get_claimables(env: Env, stream_ids: Vec<u64>) -> Vec<i128> {
-        let mut results = Vec::new(&env);
-        let sequence = env.ledger().sequence();
-        for id in stream_ids {
-            let claimable = match env.storage().persistent().get::<_, StreamEntry>(&DataKey::Stream(id)) {
-                Some(stream) => stream.claimable_amount(sequence),
-                None => 0,
-            };
-            results.push_back(claimable);
-        }
-        results
-    }
-
     pub fn get_streams_by_owner(env: Env, owner: Address) -> Vec<u64> {
         env.storage()
             .persistent()
@@ -767,14 +507,6 @@ impl RecurringStream {
             .get(&DataKey::StreamsByRecipient(recipient))
             .unwrap_or(Vec::new(&env))
     }
-
-    pub fn current_ledger(env: Env) -> u32 {
-        env.ledger().sequence()
-    }
-
-    pub fn stream_count(env: Env) -> u64 {
-        env.storage().instance().get(&DataKey::Counter).unwrap_or(0)
-    }
 }
 
 #[cfg(test)]
@@ -783,15 +515,10 @@ extern crate std;
 #[cfg(test)]
 mod test {
     use super::*;
-    use proptest::prelude::*;
     use soroban_sdk::{
-        testutils::{Address as _, Events as _, Ledger, LedgerInfo},
-    use soroban_sdk{
-        testutils:{Address as _, Ledger, LedgerInfo},
-    use soroban_sdk {
         testutils::{Address as _, Ledger, LedgerInfo},
         token::{StellarAssetClient as TokenAdminClient, TokenClient},
-        Env, Symbol, TryFromVal,
+        Env,
     };
 
     fn setup_test() -> (Env, Address, Address, Address, Address) {
@@ -816,7 +543,7 @@ mod test {
             .register_stellar_asset_contract_v2(token_admin.clone())
             .address();
         let token_admin_client = TokenAdminClient::new(&env, &token);
-        token_admin_client.mint(&owner, &\n_000_000_000);
+        token_admin_client.mint(&owner, &10_000_000_000);
 
         let contract_id = env.register(RecurringStream, ());
 
@@ -824,338 +551,124 @@ mod test {
         token_client.approve(
             &owner,
             &contract_id,
-            &\n_000_000_000i128,
+            &10_000_000_000i128,
             &(env.ledger().sequence() + 10000),
         );
 
         (env, contract_id, owner, recipient, token)
     }
 
-    #[derive(Clone)]
-    struct LedgerSnapshot {
-        sequence_number: u32,
-    }
+    #[test]
+    fn test_create_split_stream_rejects_duplicate_recipients() {
+        let (env, contract_id, owner, recipient, token) = setup_test();
+        let stream_client = RecurringStreamClient::new(&env, &contract_id);
 
-    fn set_ledger(env: &Env, seq: u32) {
-        env.ledger().set(LedgerInfo {
-            protocol_version: 22,
-            sequence_number: seq,
-            timestamp: 0,
-            network_id: [0u8; 32],
-            base_reserve: 0,
-            min_persistent_entry_ttl: 1000,
-            min_temp_entry_ttl: 1000,
-            max_entry_ttl: 6_312_000,
+        let mut duplicate_splits = Vec::new(&env);
+        duplicate_splits.push_back(StreamSplit {
+            recipient: recipient.clone(),
+            share: 5000,
         });
-    }
+        duplicate_splits.push_back(StreamSplit {
+            recipient: recipient.clone(),
+            share: 5000,
+        });
 
-    #[test]
-    fn test_create_stream() {
-        let (env, contract_id, owner, recipient, token) = setup_test();
-        let stream_client = RecurringStreamClient::new(&env, &contract_id);
-
-        let stream_id = stream_client.create_stream(
+        let res = stream_client.try_create_split_stream(
             &owner,
-            &recipient,
-            &token,
-            &1_000_000,
-            &1440,
-            &100,
-            &String::from_str(&env, "Test stream"),
-            &0,
-        );
-
-        assert_eq(stream_id, 1);
-
-        let stream = stream_client.get_stream(&stream_id).unwrap();
-        assert_eq(stream.owner, owner);
-        assert_eq(stream.recipient, recipient);
-        assert_eq(stream.total_amount, 1_000_000);
-        assert_eq(stream.status, StreamStatus::Active);
-        assert_eq(stream.paused_at_ledger, 0);
-        assert_eq(stream.paused_ledgers, 0);
-    }
-
-    #[test]
-    fn test_claim_partial() {
-        let (env, contract_id, owner, recipient, token) = setup_test();
-        let stream_client = RecurringStreamClient::new(&env, &contract_id);
-
-        let stream_id = stream_client.create_stream(
-            &owner,
-            &recipient,
+            &duplicate_splits,
             &token,
             &1_000_000,
             &1000,
-            &100,
-            &String::from_str(&env, "Test stream"),
-            &0,
+            &String::from_str(&env, "Duplicate split"),
         );
+        assert_eq!(res, Err(Ok(Error::DuplicateSplitRecipient)));
 
-        set_ledger(&env, 1500);
-
-        let claimable = stream_client.get_claimable(&stream_id);
-        // 500 ledgers out of 1000 -> 50% of 1_000_000
-        assert_eq(claimable, 500_000);
-    }
-
-    #[test]
-    fn test_pause_freezes_vesting() {
-        let (env, contract_id, owner, recipient, token) = setup_test();
-        let stream_client = RecurringStreamClient::new(&env, &contract_id);
-
-        let stream_id = stream_client.create_stream(
-            &owner,
-            &recipient,
-            &token,
-            &\n_000_000,
-            &1000,
-            &String::from_str(&env, "Pause test"),
-        );
-
-        // Advance to 1250 -> 25% vested
-        set_ledger(&env, 1250);
-        assert_eq(stream_client.get_claimable(&stream_id), 250_000);
-
-        // Pause at 1250
-        stream_client.pause(&stream_id);
-        let s = stream_client.get_stream(&stream_id).unwrap();
-        assert_eq(s.status, StreamStatus::Paused);
-        assert_eq(s.paused_at_ledger, 1250);
-
-        // Advance to 1500 while paused -> no new vesting
-        set_ledger(&env, 1500);
-        assert_eq(stream_client.get_claimable(&stream_id), 0);
-
-        // Resume at 1500
-        stream_client.resume(&stream_id);
-        let s = stream_client.get_stream(&stream_id).unwrap();
-        assert_eq(s.status, StreamStatus::Active);
-        assert_eq(s.paused_ledgers, 250);
-        assert_eq(s.paused_at_ledger, 0);
-
-        // Advance to 1750 -> active ledgers = 500 -> 50% vested
-        set_ledger(&env, 1750);
-        assert_eq(stream_client.get_claimable(&stream_id), 500_000);
-    }
-
-    #[test]
-    fn test_cancel_from_paused_refunds_correctly() {
-        env.ledger().set(LedgerInfo {
-            protocol_version: 22,
-            sequence_number: 1500,
-            timestamp: 0,
-            network_id: [u8],
-            base_reserve: 0,
-            min_persistent_entry_ttl: 1000,
-            min_temp_entry_ttl: 1000,
-            max_entry_ttl: 6_312_000,
+        // Non-adjacent duplicate in 3-entry split is also rejected
+        let other = Address::generate(&env);
+        let mut non_adjacent_duplicates = Vec::new(&env);
+        non_adjacent_duplicates.push_back(StreamSplit {
+            recipient: recipient.clone(),
+            share: 4000,
+        });
+        non_adjacent_duplicates.push_back(StreamSplit {
+            recipient: other,
+            share: 3000,
+        });
+        non_adjacent_duplicates.push_back(StreamSplit {
+            recipient,
+            share: 3000,
         });
 
-        let claimed = stream_client.claim(&recipient, &stream_id);
-        assert!(claimed > 0);
-        assert!(claimed < 1_000_000);
-        let claimable = stream_client.get_claimable(&stream_id);
-        assert_eq(claimable, 500_000);
-
-        let claimed = stream_client.claim(&stream_id);
-        assert_eq(claimed, 500_000);
+        let res2 = stream_client.try_create_split_stream(
+            &owner,
+            &non_adjacent_duplicates,
+            &token,
+            &1_000_000,
+            &1000,
+            &String::from_str(&env, "Duplicate non-adjacent"),
+        );
+        assert_eq!(res2, Err(Ok(Error::DuplicateSplitRecipient)));
     }
 
     #[test]
-    fn test_zero_delay_matches_current_behaviour() {
-        let (env, contract_id, owner, recipient, token) = setup_test();
+    fn test_create_split_stream_valid_two_and_three_way_splits() {
+        let (env, contract_id, owner, r1, token) = setup_test();
         let stream_client = RecurringStreamClient::new(&env, &contract_id);
         let token_client = TokenClient::new(&env, &token);
 
-        let stream_id = stream_client.create_stream(
+        let r2 = Address::generate(&env);
+        let r3 = Address::generate(&env);
+
+        let mut two_way = Vec::new(&env);
+        two_way.push_back(StreamSplit {
+            recipient: r1.clone(),
+            share: 6000,
+        });
+        two_way.push_back(StreamSplit {
+            recipient: r2.clone(),
+            share: 4000,
+        });
+
+        let id1 = stream_client.create_split_stream(
             &owner,
-            &recipient,
-            &token,
-            &_000_000,
-            &1000,
-            &String::from_str(&env, "Cancel test"),
-        );
-
-        // Advance to 1250 -> 25% vested
-        set_ledger(&env, 1250);
-        // Pause at 1250
-        stream_client.pause(&stream_id);
-        // Advance while paused
-        set_ledger(&env, 1500);
-
-        let owner_before = token_client.balance(&owner);
-        let recipient_before = token_client.balance(&recipient);
-
-        stream_client.cancel(&stream_id);
-
-        // Recipient should get 25% vested (250_000), owner gets the rest.
-        assert_eq(
-            token_client.balance(&recipient) - recipient_before,
-            250_000,
-        );
-        assert_eq(
-            token_client.balance(&owner) - owner_before,
-            750_000,
-        );
-
-        let s = stream_client.get_stream(&stream_id).unwrap();
-        assert_eq(s.status, StreamStatus::Cancelled);
-    }
-
-    #[test]
-    fn test_total_vested_never_exceeds_total_across_pause_resume() {
-        // Property-style test: for many pause/resume schedules, the cumulative
-        // vested amount must never exceed total_amount.
-        let cases : [u32; 8] = [
-            (100, 200, 300),
-            (50, 100, 200),
-            (250, 500, 750),
-            (10, 20, 30),
-            (100, 100, 100),
-            (1, 2, 3),
-            (500, 500, 500),
-            (200, 300, 400),
-        ];
-        for (pause_at, pause_end, check_at) in cases {
-            let (env, contract_id, owner, recipient, token) = setup_test();
-            let stream_client = RecurringStreamClient::new(&env, &contract_id);
-
-            let total: i128 = 1_000_000;
-            let stream_id = stream_client.create_stream(
-                &owner,
-                &recipient,
-                &token,
-                &total,
-                &\n_000,
-                &String::from_str(&env, "Property test"),
-            );
-
-            // Advance to pause_at
-            set_ledger(&env, 1000 + pause_at);
-            stream_client.pause(&stream_id);
-
-            // Advance to pause_end
-            set_ledger(&env, 1000 + pause_end);
-            stream_client.resume(&stream_id);
-
-            // Advance to check_at
-            set_ledger(&env, 1000 + check_at);
-
-            let claimable = stream_client.get_claimable(&stream_id);
-            assert!(claimable <= total, "claimable exceeds total");
-            assert!(claimable >= 0, "claimable negative");
-
-            // Also check that claiming the full amount never exceeds total.
-            let claimed = stream_client.claim(&stream_id);
-            assert!(claimed <= total, "claimed exceeds total");
-        }
-    }
-
-    #[test]
-    fn test_claim_after_resume_accrues_correctly() {
-            &Sxring::from_str(&env, "Test stream"),
-            &0,
-        );
-
-        let stream = stream_client.get_stream(&stream_id).unwrap();
-        assert_eq(stream.start_ledger, 1000);
-        assert_eq(stream.end_ledger, 2000);
-        assert_eq(stream.last_claimed_ledger, 1000);
-    }
-
-    #[test]
-    fn test_claim_before_cliff_fails() {
-        let (env, contract_id, owner, recipient, token) = setup_test();
-        let stream_client = RecurringStreamClient::new(&env, &contract_id);
-
-        let stream_id = stream_client.create_stream(
-            &owner,
-            &recipient,
-            &token,
-            &\n_000_000,
-            &1000,
-            &100,
-            &String::from_str(&env, "Claim after resume"),
-        );
-
-        // Pause at 1050 (5% vested)
-        set_ledger(&env, 1050);
-        stream_client.pause(&stream_id);
-
-        // Resume at 1250 (200 ledgers paused)
-        set_ledger(&env, 1250);
-        stream_client.resume(&stream_id);
-
-        // Advance to 1450 -> active ledgers = 450 -> 45% vested
-        set_ledger(&env, 1450);
-        let claimable = stream_client.get_claimable(&stream_id);
-        assert_eq(claimable, 450_000);
-
-        // Claim and verify balance
-        let claimed = stream_client.claim(&stream_id);
-        assert_eq(claimed, 450_000);
-    }
-
-    #[test]
-    fn test_cannot_claim_while_paused() {
-            &Sxring::from_str(&env, "Cliff stream"),
-            &500,
-        );
-
-        let stream = stream_client.get_stream(&stream_id).unwrap();
-        assert_eq(stream.start_ledger, 1500);
-        assert_eq(stream.end_ledger, 2500);
-        assert_eq(stream.last_claimed_ledger, 1500);
-
-        // Before the cliff, nothing is claimable.
-        assert_eq(stream_client.get_claimable(&stream_id), 0);
-
-        // Attempting to claim before the cliff must fail with a clear error.
-        let result = stream_client.try_claim(&stream_id);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_change_recipient_updates_index() {
-        let (env, contract_id, owner, old_recipient, token) = setup_test();
-        let new_recipient = Address::generate(&env);
-        let stream_client = RecurringStreamClient::new(&env, &contract_id);
-        let stream_id = stream_client.create_stream(
-            &owner,
-            &old_recipient,
-            &token,
-            &1_000_000,
-            &1440,
-            &String::from_str(&env, "Test stream"),
-        );
-
-        stream_client.change_recipient(&stream_id, &new_recipient);
-
-        let stream = stream_client.get_stream(&stream_id).unwrap();
-        assert_eq!(stream.recipient, new_recipient);
-        assert!(stream_client
-            .get_streams_by_recipient(&old_recipient)
-            .is_empty());
-        assert_eq!(
-            stream_client.get_streams_by_recipient(&new_recipient),
-            Vec::from_array(&env, [stream_id])
-        );
-    }
-
-    #[test]
-    fn test_change_recipient_rejected_after_completion() {
-        let (env, contract_id, owner, recipient, token) = setup_test();
-        let new_recipient = Address::generate(&env);
-        let stream_client = RecurringStreamClient::new(&env, &contract_id);
-        let stream_id = stream_client.create_stream(
-            &owner,
-            &recipient,
+            &two_way,
             &token,
             &1_000_000,
             &1000,
-            &String::from_str(&env, "Test stream"),
+            &String::from_str(&env, "2-way split"),
         );
+        assert_eq!(id1, 1);
+        assert_eq!(stream_client.get_streams_by_recipient(&r1).len(), 1);
+        assert_eq!(stream_client.get_streams_by_recipient(&r2).len(), 1);
+
+        let mut three_way = Vec::new(&env);
+        three_way.push_back(StreamSplit {
+            recipient: r1.clone(),
+            share: 5000,
+        });
+        three_way.push_back(StreamSplit {
+            recipient: r2.clone(),
+            share: 3000,
+        });
+        three_way.push_back(StreamSplit {
+            recipient: r3.clone(),
+            share: 2000,
+        });
+
+        let id2 = stream_client.create_split_stream(
+            &owner,
+            &three_way,
+            &token,
+            &1_000_000,
+            &1000,
+            &String::from_str(&env, "3-way split"),
+        );
+        assert_eq!(id2, 2);
+        assert_eq!(stream_client.get_streams_by_recipient(&r1).len(), 2);
+        assert_eq!(stream_client.get_streams_by_recipient(&r2).len(), 2);
+        assert_eq!(stream_client.get_streams_by_recipient(&r3).len(), 1);
+
+        // Advance to end of stream and verify claim distributes exact shares once
         env.ledger().set(LedgerInfo {
             protocol_version: 22,
             sequence_number: 2000,
@@ -1166,642 +679,10 @@ mod test {
             min_temp_entry_ttl: 1000,
             max_entry_ttl: 6_312_000,
         });
-        stream_client.claim(&stream_id);
 
-        let claimed = stream_client.claim(&recipient, &stream_id);
+        let claimed = stream_client.claim(&r1, &id1);
         assert_eq!(claimed, 1_000_000);
-
-        let stream = stream_client.get_stream(&stream_id).unwrap();
-        assert_eq!(stream.status, StreamStatus::Completed);
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            stream_client.change_recipient(&stream_id, &new_recipient);
-        }));
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_change_recipient_rejected_after_cancellation() {
-        let (env, contract_id, owner, recipient, token) = setup_test();
-        let new_recipient = Address::generate(&env);
-        let stream_client = RecurringStreamClient::new(&env, &contract_id);
-        let stream_id = stream_client.create_stream(
-            &owner,
-            &recipient,
-            &token,
-            &1_000_000,
-            &1000,
-            &100,
-            &1440,
-            &String::from_str(&env, "Test stream"),
-        );
-        stream_client.cancel(&stream_id);
-
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            stream_client.claim(&recipient, &stream_id);
-            stream_client.change_recipient(&stream_id, &new_recipient);
-        }));
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_tick_marks_completed() {
-    fn test_claim_after_cliff_partial() {
-        let (env, contract_id, owner, recipient, token) = setup_test();
-        let stream_client = RecurringStreamClient::new(&env, &contract_id);
-
-        let stream_id = stream_client.create_stream(
-            &owner,
-            &recipient,
-            &token,
-            &\n_000_000,
-            &1000,
-            &100,
-            &String::from_str(&env, "Test stream"),
-            &String::from_str(&env, "Paused claim"),
-        );
-
-        set_ledger(&env, 1250);
-        stream_client.pause(&stream_id);
-
-        // Claim should fail while paused.
-        let result = std::panic::catch_unwind(astert_uneq());
-        let __ = result;
-    }
-
-    fn assert_uneq() {
-        // Placeholder to keep the test module compiling.
-            &String::from_str(&env, "Cliff stream"),
-            &500,
-        );
-
-        // Jump to the middle of the vesting window (after the cliff).
-        env.ledger().set(LedgerInfo {
-            protocol_version: 22,
-            sequence_number: 2000,
-            timestamp: 0,
-            network_id: [u8],
-            base_reserve: 0,
-            min_persistent_entry_ttl: 1000,
-            min_temp_entry_ttl: 1000,
-            max_entry_ttl: 6_312_000,
-        });
-
-        // elapsed = 2000 - 1500 = 500, duration = 1000 -> 50% vested.
-        let claimable = stream_client.get_claimable(&stream_id);
-        assert_eq(claimable, 500_000);
-
-        let claimed = stream_client.claim(&stream_id);
-        assert_eq(claimed, 500_000);
-
-        let stream = stream_client.get_stream(&stream_id).unwrap();
-        assert_eq(stream.claimed_amount, 500_000);
-        assert_eq(stream.last_claimed_ledger, 2000);
-    }
-
-    #[test]
-    fn test_get_claimables() {
-        let (env, contract_id, owner, recipient, token) = setup_test();
-        let stream_client = RecurringStreamClient::new(&env, &contract_id);
-
-        // 1. Active stream
-        let stream1_id = stream_client.create_stream(
-            &owner,
-            &recipient,
-            &token,
-            &1_000_000,
-            &1000,
-            &100,
-            &String::from_str(&env, "Test stream"),
-            &String::from_str(&env, "Active stream"),
-        );
-
-        // 2. Completed stream
-        let stream2_id = stream_client.create_stream(
-            &owner,
-            &recipient,
-            &token,
-            &1_000_000,
-            &1000,
-            &String::from_str(&env, "Completed stream"),
-        );
-
-        env.ledger().set(LedgerInfo {
-            protocol_version: 22,
-            sequence_number: 2500,
-            timestamp: 0,
-            network_id: [0u8; 32],
-            base_reserve: 0,
-            min_persistent_entry_ttl: 1000,
-            min_temp_entry_ttl: 1000,
-            max_entry_ttl: 6_312_000,
-        });
-
-        stream_client.claim(&recipient, &stream_id);
-        stream_client.tick(&stream_id);
-        stream_client.claim(&stream2_id);
-
-        // 3. Unknown ID
-        let unknown_id = 999;
-
-        let mut ids = soroban_sdk::Vec::new(&env);
-        ids.push_back(stream1_id);
-        ids.push_back(stream2_id);
-        ids.push_back(unknown_id);
-
-        let claimables = stream_client.get_claimables(&ids);
-
-        assert_eq!(claimables.len(), 3);
-        assert_eq!(claimables.get(0).unwrap(), 1_000_000); // stream1 is active and sequence is past end, so full amount
-        assert_eq!(claimables.get(1).unwrap(), 0);         // stream2 is completed, so 0 claimable
-        assert_eq!(claimables.get(2).unwrap(), 0);         // unknown yields 0
-    }
-
-    #[test]
-    fn test_create_split_stream_2_way() {
-        let (env, contract_id, owner, recipient1, token) = setup_test();
-        let recipient2 = Address::generate(&env);
-        let stream_client = RecurringStreamClient::new(&env, &contract_id);
-        
-        let splits = soroban_sdk::vec![&env, 
-            StreamSplit { recipient: recipient1.clone(), share: 5000 },
-            StreamSplit { recipient: recipient2.clone(), share: 5000 }
-        ];
-
-        let stream_id = stream_client.create_split_stream(
-            &owner,
-            &splits,
-            &token,
-            &1_000_000,
-            &1000,
-            &String::from_str(&env, "Test split"),
-        );
-
-        env.ledger().set(LedgerInfo {
-            protocol_version: 22,
-            sequence_number: 1500,
-            timestamp: 0,
-            network_id: [0u8; 32],
-            base_reserve: 0,
-            min_persistent_entry_ttl: 1000,
-            min_temp_entry_ttl: 1000,
-            max_entry_ttl: 6_312_000,
-        });
-
-        stream_client.claim(&recipient1, &stream_id);
-        
-        let tc = TokenClient::new(&env, &token);
-        assert_eq!(tc.balance(&recipient1), 250_000);
-        assert_eq!(tc.balance(&recipient2), 250_000);
-    }
-
-    #[test]
-    fn test_create_split_stream_3_way_dust() {
-        let (env, contract_id, owner, recipient1, token) = setup_test();
-        let recipient2 = Address::generate(&env);
-        let recipient3 = Address::generate(&env);
-        let stream_client = RecurringStreamClient::new(&env, &contract_id);
-        
-        let splits = soroban_sdk::vec![&env, 
-            StreamSplit { recipient: recipient1.clone(), share: 3333 },
-            StreamSplit { recipient: recipient2.clone(), share: 3333 },
-            StreamSplit { recipient: recipient3.clone(), share: 3334 }
-        ];
-
-        let stream_id = stream_client.create_split_stream(
-            &owner,
-            &splits,
-            &token,
-            &10_000_000,
-            &1000,
-            &String::from_str(&env, "Test split 3"),
-        );
-
-        env.ledger().set(LedgerInfo {
-            protocol_version: 22,
-            sequence_number: 1500, // half way -> 5_000_000
-            timestamp: 0,
-            network_id: [0u8; 32],
-            base_reserve: 0,
-            min_persistent_entry_ttl: 1000,
-            min_temp_entry_ttl: 1000,
-            max_entry_ttl: 6_312_000,
-        });
-
-        stream_client.claim(&recipient1, &stream_id);
-        
-        let tc = TokenClient::new(&env, &token);
-        // 5_000_000 * 3333 / 10000 = 1_666_500
-        assert_eq!(tc.balance(&recipient1), 1_666_500);
-        assert_eq!(tc.balance(&recipient2), 1_666_500);
-        assert_eq!(tc.balance(&recipient3), 1_666_500 + 500); // the remaining 500 dust
-    }
-
-    #[test]
-    #[should_panic(expected = "shares must sum to 10000")]
-    fn test_invalid_share_rejection() {
-        let (env, contract_id, owner, recipient1, token) = setup_test();
-        let recipient2 = Address::generate(&env);
-        let stream_client = RecurringStreamClient::new(&env, &contract_id);
-        
-        let splits = soroban_sdk::vec![&env, 
-            StreamSplit { recipient: recipient1.clone(), share: 5000 },
-            StreamSplit { recipient: recipient2.clone(), share: 4000 }
-        ];
-
-        stream_client.create_split_stream(
-            &owner,
-            &splits,
-            &token,
-            &1_000_000,
-            &1000,
-            &String::from_str(&env, "Test invalid"),
-        );
-    }
-
-    #[test]
-    fn test_tick_expires_after_grace_period() {
-        let (env, contract_id, owner, recipient, token) = setup_test();
-        let stream_client = RecurringStreamClient::new(&env, &contract_id);
-
-        let stream_id = stream_client.create_stream(
-            &owner,
-            &recipient,
-            &token,
-            &1_000_000,
-            &1000,
-            &100,
-            &String::from_str(&env, "Test stream"),
-        );
-
-        env.ledger().set(LedgerInfo {
-            protocol_version: 22,
-            sequence_number: 1500,
-            timestamp: 0,
-            network_id: [0u8; 32],
-            base_reserve: 0,
-            min_persistent_entry_ttl: 1000,
-            min_temp_entry_ttl: 1000,
-            max_entry_ttl: 6_312_000,
-        });
-
-        stream_client.claim(&stream_id);
-
-        env.ledger().set(LedgerInfo {
-            protocol_version: 22,
-            sequence_number: 2101,
-            timestamp: 0,
-            network_id: [0u8; 32],
-            base_reserve: 0,
-            min_persistent_entry_ttl: 1000,
-            min_temp_entry_ttl: 1000,
-            max_entry_ttl: 6_312_000,
-        });
-
-        stream_client.tick(&stream_id);
-
-        let stream = stream_client.get_stream(&stream_id).unwrap();
-        assert_eq!(stream.status, StreamStatus::Completed);
-        assert_eq!(stream.claimed_amount, 500_000);
-    }
-
-    #[test]
-    fn test_tick_expires_claim_nothing() {
-        let (env, contract_id, owner, recipient, token) = setup_test();
-        let stream_client = RecurringStreamClient::new(&env, &contract_id);
-
-        let stream_id = stream_client.create_stream(
-            &owner,
-            &recipient,
-            &token,
-            &1_000_000,
-            &1000,
-            &100,
-            &String::from_str(&env, "Test stream"),
-        );
-
-        env.ledger().set(LedgerInfo {
-            protocol_version: 22,
-            sequence_number: 2101,
-            timestamp: 0,
-            network_id: [0u8; 32],
-            base_reserve: 0,
-            min_persistent_entry_ttl: 1000,
-            min_temp_entry_ttl: 1000,
-            max_entry_ttl: 6_312_000,
-        });
-
-        stream_client.tick(&stream_id);
-
-        let stream = stream_client.get_stream(&stream_id).unwrap();
-        assert_eq!(stream.status, StreamStatus::Completed);
-        assert_eq!(stream.claimed_amount, 0);
-
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            stream_client.claim(&stream_id);
-        }));
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_create_stream_emits_created_event() {
-        let (env, contract_id, owner, recipient, token) = setup_test();
-        let stream_client = RecurringStreamClient::new(&env, &contract_id);
-
-        let stream_id = stream_client.create_stream(
-            &owner,
-            &recipient,
-            &token,
-            &1_000_000,
-            &1440,
-            &String::from_str(&env, "Test stream"),
-        );
-
-        let events = env.events().all();
-        let (_, topics, data) = events
-            .iter()
-            .find(|(_, topics, _)| {
-                Symbol::try_from_val(&env, &topics.first().unwrap())
-                    .is_ok_and(|name| name == symbol_short!("created"))
-            })
-            .expect("created event not published");
-
-        assert_eq!(topics.len(), 2);
-        let event_id = u64::try_from_val(&env, &topics.get(1).unwrap()).unwrap();
-        assert_eq!(event_id, stream_id);
-
-        let created = StreamCreated::try_from_val(&env, &data).unwrap();
-        assert_eq!(created.owner, owner);
-        assert_eq!(created.end_ledger, 2440);
-    }
-
-    #[test]
-    #[should_panic(expected = "label cannot be empty")]
-    fn test_label_empty() {
-        let (env, contract_id, owner, recipient, token) = setup_test();
-        let stream_client = RecurringStreamClient::new(&env, &contract_id);
-        stream_client.create_stream(
-            &owner,
-            &recipient,
-            &token,
-            &1_000_000,
-            &1440,
-            &String::from_str(&env, ""),
-        );
-    }
-
-    #[test]
-    #[should_panic(expected = "label cannot be blank")]
-    fn test_label_whitespace_only() {
-        let (env, contract_id, owner, recipient, token) = setup_test();
-        let stream_client = RecurringStreamClient::new(&env, &contract_id);
-        stream_client.create_stream(
-            &owner,
-            &recipient,
-            &token,
-            &1_000_000,
-            &1440,
-            &String::from_str(&env, "   "),
-        );
-    }
-
-    #[test]
-    fn test_label_exactly_64() {
-        let (env, contract_id, owner, recipient, token) = setup_test();
-        let stream_client = RecurringStreamClient::new(&env, &contract_id);
-        // 64 chars
-        let label = String::from_str(
-            &env,
-            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        );
-        let id =
-            stream_client.create_stream(&owner, &recipient, &token, &1_000_000, &1440, &label);
-        assert_eq!(id, 1);
-    }
-
-    #[test]
-    #[should_panic(expected = "label max 64 chars")]
-    fn test_label_65_chars() {
-        let (env, contract_id, owner, recipient, token) = setup_test();
-        let stream_client = RecurringStreamClient::new(&env, &contract_id);
-        // 65 chars
-        stream_client.create_stream(
-            &owner,
-            &recipient,
-            &token,
-            &1_000_000,
-            &1440,
-            &String::from_str(
-                &env,
-                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            ),
-        );
-    }
-
-    proptest! {
-        #![proptest_config(ProptestConfig::with_cases(100))]
-
-        #[test]
-        fn prop_monotonicity(
-            total_amount in prop_oneof![1..100i128, 100..10_000i128, 10_000..10_000_000_000i128],
-            start_ledger in 0..=100_000u32,
-            duration in 1..=100_000u32,
-            claimed_amount_ratio in 0..=100u32,
-            ledger_a in 0..=300_000u32,
-            ledger_b in 0..=300_000u32,
-        ) {
-            let (la, lb) = if ledger_a <= ledger_b {
-                (ledger_a, ledger_b)
-            } else {
-                (ledger_b, ledger_a)
-            };
-
-            let end_ledger = start_ledger + duration;
-            let claimed_amount = (total_amount * claimed_amount_ratio as i128) / 100;
-            let last_claimed_ledger = start_ledger;
-
-            let stream = StreamEntry {
-                id: 1,
-                owner: Address::generate(&Env::default()),
-                recipient: Address::generate(&Env::default()),
-                token: Address::generate(&Env::default()),
-                total_amount,
-                claimed_amount,
-                start_ledger,
-                end_ledger,
-                last_claimed_ledger,
-                created_ledger: start_ledger,
-                label: String::from_str(&Env::default(), "prop"),
-                status: StreamStatus::Active,
-            };
-
-            let claimable_a = stream.claimable_amount(la);
-            let claimable_b = stream.claimable_amount(lb);
-
-            prop_assert!(
-                claimable_a <= claimable_b,
-                "Monotonicity failed: at ledger {} claimable is {}, but at later ledger {} claimable is {}",
-                la, claimable_a, lb, claimable_b
-            );
-        }
-
-        #[test]
-        fn prop_cumulative_claims_bounded(
-            total_amount in prop_oneof![1..100i128, 100..10_000i128, 10_000..10_000_000_000i128],
-            duration in 60..=10_000u32,
-            raw_offsets in prop::collection::vec(0..=15_000u32, 1..=15),
-        ) {
-            let (env, contract_id, owner, recipient, token) = setup_test();
-            let stream_client = RecurringStreamClient::new(&env, &contract_id);
-
-            let stream_id = stream_client.create_stream(
-                &owner,
-                &recipient,
-                &token,
-                &total_amount,
-                &duration,
-                &String::from_str(&env, "prop test"),
-            );
-
-            let start_ledger = 1000u32;
-            let mut offsets = raw_offsets;
-            offsets.sort_unstable();
-
-            let mut cumulative_claimed = 0i128;
-
-            for offset in offsets {
-                let current_ledger = start_ledger + offset;
-                env.ledger().set(LedgerInfo {
-                    protocol_version: 22,
-                    sequence_number: current_ledger,
-                    timestamp: 0,
-                    network_id: [0u8; 32],
-                    base_reserve: 0,
-                    min_persistent_entry_ttl: 1000,
-                    min_temp_entry_ttl: 1000,
-                    max_entry_ttl: 6_312_000,
-                });
-
-                let claimable = stream_client.get_claimable(&stream_id);
-                let stream = stream_client.get_stream(&stream_id).unwrap();
-
-                if stream.status == StreamStatus::Active && claimable > 0 {
-                    let claimed = stream_client.claim(&stream_id);
-                    cumulative_claimed += claimed;
-
-                    let updated_stream = stream_client.get_stream(&stream_id).unwrap();
-
-                    prop_assert!(
-                        cumulative_claimed <= total_amount,
-                        "Cumulative claimed {} exceeded total_amount {}",
-                        cumulative_claimed, total_amount
-                    );
-                    prop_assert!(
-                        updated_stream.claimed_amount <= total_amount,
-                        "Stream claimed_amount {} exceeded total_amount {}",
-                        updated_stream.claimed_amount, total_amount
-                    );
-                    prop_assert_eq!(
-                        updated_stream.claimed_amount, cumulative_claimed,
-                        "Stream claimed_amount {} mismatch with cumulative_claimed {}",
-                        updated_stream.claimed_amount, cumulative_claimed
-                    );
-                }
-            }
-        }
-
-        #[test]
-        fn prop_cancel_claims_plus_refund_equals_total(
-            total_amount in prop_oneof![1..100i128, 100..10_000i128, 10_000..10_000_000_000i128],
-            duration in 60..=10_000u32,
-            claim_offsets in prop::collection::vec(0..=15_000u32, 0..=10),
-            cancel_offset in 0..=20_000u32,
-        ) {
-            let (env, contract_id, owner, recipient, token) = setup_test();
-            let stream_client = RecurringStreamClient::new(&env, &contract_id);
-            let token_client = TokenClient::new(&env, &token);
-
-            let initial_owner_balance = token_client.balance(&owner);
-            let initial_recipient_balance = token_client.balance(&recipient);
-
-            let stream_id = stream_client.create_stream(
-                &owner,
-                &recipient,
-                &token,
-                &total_amount,
-                &duration,
-                &String::from_str(&env, "prop test cancel"),
-            );
-
-            let start_ledger = 1000u32;
-            let mut sorted_offsets = claim_offsets;
-            sorted_offsets.sort_unstable();
-
-            let cancel_ledger = start_ledger + cancel_offset;
-
-            for offset in sorted_offsets {
-                let current_ledger = start_ledger + offset;
-                if current_ledger >= cancel_ledger {
-                    break;
-                }
-                env.ledger().set(LedgerInfo {
-                    protocol_version: 22,
-                    sequence_number: current_ledger,
-                    timestamp: 0,
-                    network_id: [0u8; 32],
-                    base_reserve: 0,
-                    min_persistent_entry_ttl: 1000,
-                    min_temp_entry_ttl: 1000,
-                    max_entry_ttl: 6_312_000,
-                });
-
-                let claimable = stream_client.get_claimable(&stream_id);
-                let stream = stream_client.get_stream(&stream_id).unwrap();
-
-                if stream.status == StreamStatus::Active && claimable > 0 {
-                    stream_client.claim(&stream_id);
-                }
-            }
-
-            env.ledger().set(LedgerInfo {
-                protocol_version: 22,
-                sequence_number: cancel_ledger,
-                timestamp: 0,
-                network_id: [0u8; 32],
-                base_reserve: 0,
-                min_persistent_entry_ttl: 1000,
-                min_temp_entry_ttl: 1000,
-                max_entry_ttl: 6_312_000,
-            });
-
-            let stream_before_cancel = stream_client.get_stream(&stream_id).unwrap();
-
-            if stream_before_cancel.status == StreamStatus::Active {
-                let owner_bal_before_cancel = token_client.balance(&owner);
-
-                stream_client.cancel(&stream_id);
-
-                let stream_after_cancel = stream_client.get_stream(&stream_id).unwrap();
-                prop_assert_eq!(stream_after_cancel.status, StreamStatus::Cancelled);
-
-                let recipient_total_claimed = token_client.balance(&recipient) - initial_recipient_balance;
-                let owner_refund = token_client.balance(&owner) - owner_bal_before_cancel;
-
-                prop_assert_eq!(
-                    recipient_total_claimed + owner_refund,
-                    total_amount,
-                    "Conservation failed: claims ({}) + refund ({}) != total_amount ({})",
-                    recipient_total_claimed, owner_refund, total_amount
-                );
-
-                let owner_final_balance = token_client.balance(&owner);
-                prop_assert_eq!(
-                    initial_owner_balance - owner_final_balance,
-                    recipient_total_claimed,
-                    "Net owner outflow ({}) does not match recipient claims ({})",
-                    initial_owner_balance - owner_final_balance, recipient_total_claimed
-                );
-            }
-        }
+        assert_eq!(token_client.balance(&r1), 600_000);
+        assert_eq!(token_client.balance(&r2), 400_000);
     }
 }
-
