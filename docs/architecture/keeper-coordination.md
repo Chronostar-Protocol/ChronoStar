@@ -12,7 +12,7 @@ The `keeper-coordinator` Soroban contract stores:
 - a claim keyed by `(resource, id)`, where `resource` distinguishes `vault`, `stream`, and `dca` IDs;
 - each claim's owner and exclusive `expires_at` ledger.
 
-Any address may register itself, supporting a future permissionless keeper set. Registration and claim acquisition require that address's authorization. `claim(resource, id, keeper, ttl_ledgers)` succeeds when no live claim exists, when the previous claim has expired, or when the same keeper renews it. TTL must be non-zero and is capped to limit accidental long-lived locks. A claim is live while `current_ledger < expires_at`; therefore a crashed keeper can delay work only until that explicit ledger.
+Any address may register itself, supporting a future permissionless keeper set. Registration and claim acquisition require that address's authorization. `claim(resource, id, keeper, ttl_ledgers)` succeeds when no live claim exists, when the previous claim has expired, or when the same keeper renews it. TTL must be at least `MIN_LOCK_TTL_LEDGERS` (`5` ledgers, ~25 seconds) and at most `MAX_LOCK_TTL_LEDGERS` (`1,000` ledgers, ~83 minutes). Enforcing a minimum of `5` ledgers ensures a lease cannot expire while the guarded Soroban transaction is still being simulated, signed, included, and settled on-chain, while the upper bound caps how long a crashed keeper can delay work. A claim is live while `current_ledger < expires_at`; therefore a crashed keeper can delay work only until that explicit ledger.
 
 The contract emits registration, claim, and release events. Claims use persistent storage and extend their storage TTL beyond the logical lock TTL; logical expiry never depends on Soroban entry eviction.
 

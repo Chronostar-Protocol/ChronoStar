@@ -4,7 +4,14 @@ use soroban_sdk::{
     contract, contractimpl, contractmeta, contracttype, symbol_short, Address, Env, Symbol,
 };
 
-const MAX_LOCK_TTL_LEDGERS: u32 = 1_000;
+/// Minimum claim lock TTL in ledgers (~25 seconds at 5s/ledger).
+/// Covers a single Soroban transaction's inclusion and settlement window plus RPC margin
+/// between acquiring the claim and submitting the guarded invocation.
+pub const MIN_LOCK_TTL_LEDGERS: u32 = 5;
+
+/// Maximum claim lock TTL in ledgers (~83 minutes at 5s/ledger).
+/// Caps how long a crashed keeper can delay another keeper from taking over a schedule.
+pub const MAX_LOCK_TTL_LEDGERS: u32 = 1_000;
 const STORAGE_TTL_LEDGERS: u32 = 100_000;
 
 contractmeta!(key = "name", val = "ChronoStar Keeper Coordinator");
@@ -14,7 +21,12 @@ contractmeta!(
     val = "Exclusive claim ledger that stops two keepers executing the same schedule"
 );
 
-
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DataKey {
+    Keeper(Address),
+    Claim(Symbol, u64),
+}
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -54,13 +66,19 @@ impl KeeperCoordinator {
             .unwrap_or(false)
     }
 
+    /// Acquires or renews an exclusive claim on `(resource, id)` for `ttl_ledgers` ledgers.
+    ///
+    /// `ttl_ledgers` must satisfy `MIN_LOCK_TTL_LEDGERS <= ttl_ledgers <= MAX_LOCK_TTL_LEDGERS`.
     pub fn claim(env: Env, resource: Symbol, id: u64, keeper: Address, ttl_ledgers: u32) -> bool {
         keeper.require_auth();
         assert!(
             Self::is_registered(env.clone(), keeper.clone()),
             "keeper not registered"
         );
-        assert!(ttl_ledgers > 0, "lock TTL must be positive");
+        assert!(
+            ttl_ledgers >= MIN_LOCK_TTL_LEDGERS,
+            "lock TTL below minimum"
+        );
         assert!(ttl_ledgers <= MAX_LOCK_TTL_LEDGERS, "lock TTL too large");
 
         let key = DataKey::Claim(resource.clone(), id);
@@ -148,5 +166,39 @@ mod test {
         client.register(&keeper);
         assert!(client.claim(&symbol_short!("vault"), &1, &keeper, &5));
         assert!(client.claim(&symbol_short!("dca"), &1, &keeper, &5));
+    }
+
+    #[test]
+    #[should_panic(expected = "lock TTL below minimum")]
+    fn claim_rejects_ttl_below_minimum() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract = env.register(KeeperCoordinator, ());
+        let client = KeeperCoordinatorClient::new(&env, &contract);
+        let keeper = Address::generate(&env);
+        client.register(&keeper);
+        client.claim(
+            &symbol_short!("vault"),
+            &1,
+            &keeper,
+            &(MIN_LOCK_TTL_LEDGERS - 1),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "lock TTL too large")]
+    fn claim_rejects_ttl_above_maximum() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract = env.register(KeeperCoordinator, ());
+        let client = KeeperCoordinatorClient::new(&env, &contract);
+        let keeper = Address::generate(&env);
+        client.register(&keeper);
+        client.claim(
+            &symbol_short!("vault"),
+            &1,
+            &keeper,
+            &(MAX_LOCK_TTL_LEDGERS + 1),
+        );
     }
 }
