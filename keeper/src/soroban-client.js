@@ -4,11 +4,9 @@ import {
   BASE_FEE,
   Contract,
   Keypair,
-  Memo,
   TransactionBuilder,
   rpc,
   scValToNative,
-  xdr,
 } from "@stellar/stellar-sdk";
 import { config } from "./config.js";
 import { logger } from "./logger.js";
@@ -32,7 +30,7 @@ export class SorobanClient {
     return this.sourceAccount || new Account(DUMMY_ACCOUNT_ID, "0");
   }
 
-  _buildTx(contractId, method, args, feeAccount, correlationId) {
+  _buildTx(contractId, method, args = [], feeAccount, _correlationId) {
     const contract = new Contract(contractId);
     const op = contract.call(method, ...args);
     const builder = new TransactionBuilder(feeAccount || this._account(), {
@@ -42,11 +40,6 @@ export class SorobanClient {
       .addOperation(op)
       .setTimeout(30);
 
-    if (correlationId) {
-      const memoStr = String(correlationId).replace(/-/g, "").slice(0, 28);
-      builder.addMemo(Memo.text(memoStr));
-    }
-
     return builder.build();
   }
 
@@ -54,7 +47,7 @@ export class SorobanClient {
     return rpc.assembleTransaction(tx, simulation).build();
   }
 
-  async readContract(contractId, method, args) {
+  async readContract(contractId, method, args = []) {
     const tx = this._buildTx(contractId, method, args);
     const sim = await this.server.simulateTransaction(tx);
     if (sim.error || !rpc.Api.isSimulationSuccess(sim)) {
@@ -97,7 +90,7 @@ export class SorobanClient {
     return this.invokeContract(coordinatorId, "unregister", [this._keeperArg()], correlationId);
   }
 
-  async invokeContract(contractId, method, args, correlationId) {
+  async invokeContract(contractId, method, args = [], correlationId) {
     if (!this.sourceAccount || !this.sourceKeypair) {
       throw new Error("keeper secret required to invoke contract calls");
     }
@@ -136,6 +129,9 @@ export class SorobanClient {
             { correlationId, txHash, method, contractId, status: receipt.status },
             "contract transaction settled",
           );
+          if (receipt.status === "FAILED") {
+            throw new Error(`getTransaction failed: ${receipt.resultXdr || receipt.status}`);
+          }
           return { ...receipt, hash: txHash, correlationId };
         }
         return { ...submitResponse, hash: txHash, correlationId };

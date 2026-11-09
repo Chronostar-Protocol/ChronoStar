@@ -8,7 +8,7 @@ const TEST_CONTRACT = "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4"
 const TEST_ACCOUNT = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
 
 describe("SorobanClient", () => {
-  it("builds transaction with memo and returns correlationId and hash", async () => {
+  it("builds transaction and returns correlationId and hash", async () => {
     const client = new SorobanClient();
     client.sourceAccount = new Account(TEST_ACCOUNT, "1");
     client.sourceKeypair = {
@@ -43,36 +43,54 @@ describe("SorobanClient", () => {
     assert.strictEqual(client._assemble.mock.callCount(), 1);
   });
 
-  it("refreshes source account sequence on submission failure", async () => {
+  it("refreshes source account sequence on submission failure and succeeds on retry", async () => {
     const client = new SorobanClient();
     let getAccountCalls = 0;
+    let simCalls = 0;
 
     const originalAttempts = config.retryMaxAttempts;
     const originalDelay = config.retryBaseDelayMs;
-    config.retryMaxAttempts = 1;
+    config.retryMaxAttempts = 2;
     config.retryBaseDelayMs = 0;
 
     client.sourceKeypair = {
       publicKey: () => TEST_ACCOUNT,
       sign: mock.fn(),
     };
+    client._assemble = mock.fn(() => ({ sign: () => {} }));
 
     client.server = {
       getAccount: mock.fn(async () => {
         getAccountCalls++;
         return new Account(TEST_ACCOUNT, String(100 + getAccountCalls));
       }),
-      simulateTransaction: mock.fn(async () => ({ error: "sim_error" })),
+      simulateTransaction: mock.fn(async () => {
+        simCalls++;
+        if (simCalls === 1) return { error: "sim_error" };
+        return { result: { retval: null }, transactionData: {} };
+      }),
+      sendTransaction: mock.fn(async () => ({
+        status: "PENDING",
+        hash: "retry_tx_hash",
+      })),
+      getTransaction: mock.fn(async () => ({
+        status: "SUCCESS",
+      })),
     };
 
     client.sourceAccount = new Account(TEST_ACCOUNT, "100");
 
     try {
-      await assert.rejects(
-        () => client.invokeContract(TEST_CONTRACT, "test_method", []),
-        /test_method simulation failed: sim_error/,
+      const result = await client.invokeContract(
+        TEST_CONTRACT,
+        "test_method",
+        [],
+        "corr-retry-ok",
       );
-      assert.ok(getAccountCalls > 0);
+      assert.strictEqual(result.hash, "retry_tx_hash");
+      assert.strictEqual(result.correlationId, "corr-retry-ok");
+      assert.strictEqual(getAccountCalls, 1);
+      assert.strictEqual(simCalls, 2);
     } finally {
       config.retryMaxAttempts = originalAttempts;
       config.retryBaseDelayMs = originalDelay;
