@@ -8,7 +8,7 @@ function mockReadContract(responses) {
 }
 
 function mockLogger() {
-  const child = { info: mock.fn(), error: mock.fn() };
+  const child = { info: mock.fn(), error: mock.fn(), debug: mock.fn() };
   return { child: mock.fn(() => child), info: mock.fn(), error: mock.fn() };
 }
 
@@ -67,6 +67,23 @@ describe("StreamWatcher", () => {
     const invokeContract = mock.fn();
     const client = {
       readContract: mockReadContract([1, 200, [{ status: ["Active"], end_ledger: 300 }]]),
+      invokeContract,
+    };
+
+    const watcher = new StreamWatcher(client, "C...");
+    await watcher.poll();
+
+    assert.strictEqual(invokeContract.mock.callCount(), 0);
+  });
+
+  it("waits for grace_period_ledgers before ticking a completed stream", async () => {
+    const invokeContract = mock.fn();
+    const client = {
+      readContract: mockReadContract([
+        1,
+        150,
+        [{ status: ["Active"], end_ledger: 100, grace_period_ledgers: 60 }],
+      ]),
       invokeContract,
     };
 

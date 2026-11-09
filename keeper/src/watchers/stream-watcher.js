@@ -42,9 +42,14 @@ export class StreamWatcher {
       if (!streamCount) return;
 
       const numStreams = Number(streamCount);
+      if (!Number.isFinite(numStreams) || numStreams <= 0) return;
+
+      // Read current_ledger once per poll cycle rather than inside the stream loop.
       const currentSeq = Number(
         await this.client.readContract(this.contractId, "current_ledger", []),
       );
+      if (!Number.isFinite(currentSeq)) return;
+
       for (let i = 1; i <= numStreams; i++) {
         const stream = await this.client.readContract(this.contractId, "get_stream", [
           xdr.ScVal.scvU64(BigInt(i)),
