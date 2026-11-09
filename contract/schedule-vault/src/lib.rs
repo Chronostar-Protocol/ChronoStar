@@ -6,6 +6,8 @@ use soroban_sdk::{
 };
 
 const MAX_LABEL_LEN: u32 = 64;
+/// Maximum offset after `release_ledger` for `expires_after_ledger` (~5 years at 5s per ledger).
+pub const MAX_EXPIRY_OFFSET_LEDGERS: u32 = 31_536_000;
 
 contractmeta!(key = "name", val = "ChronoStar Schedule Vault");
 contractmeta!(key = "version", val = "0.1.0");
@@ -30,6 +32,7 @@ pub enum Error {
     CannotCancelAfterReleaseLedger = 11,
     VaultNotPaused = 12,
     VaultNotYetExpired = 13,
+    ExpiryTooFarInFuture = 14,
 }
 
 pub const MAX_BATCH_SIZE: u32 = 50;
@@ -114,6 +117,12 @@ impl ScheduleVault {
         if let Some(expiry) = expires_after_ledger {
             if expiry <= release_ledger {
                 return Err(Error::ExpiryMustBeAfterReleaseLedger);
+            }
+            let max_expiry = release_ledger
+                .checked_add(MAX_EXPIRY_OFFSET_LEDGERS)
+                .ok_or(Error::ExpiryTooFarInFuture)?;
+            if expiry > max_expiry {
+                return Err(Error::ExpiryTooFarInFuture);
             }
         }
 
@@ -921,7 +930,7 @@ mod test {
     }
 
     #[test]
-    #[should_panic(expected = "label cannot be empty")]
+    #[should_panic(expected = "Error(Contract, #3)")]
     fn test_label_empty() {
         let (env, contract_id, owner, recipient, token) = setup_test();
         let vault_client = ScheduleVaultClient::new(&env, &contract_id);
@@ -937,7 +946,7 @@ mod test {
     }
 
     #[test]
-    #[should_panic(expected = "label cannot be blank")]
+    #[should_panic(expected = "Error(Contract, #4)")]
     fn test_label_whitespace_only() {
         let (env, contract_id, owner, recipient, token) = setup_test();
         let vault_client = ScheduleVaultClient::new(&env, &contract_id);
@@ -967,7 +976,7 @@ mod test {
     }
 
     #[test]
-    #[should_panic(expected = "label max 64 chars")]
+    #[should_panic(expected = "Error(Contract, #5)")]
     fn test_label_65_chars() {
         let (env, contract_id, owner, recipient, token) = setup_test();
         let vault_client = ScheduleVaultClient::new(&env, &contract_id);
@@ -1013,5 +1022,36 @@ mod test {
 
         let vault = vault_client.get_vault(&vault_id).unwrap();
         assert_eq!(vault.owner, new_owner);
+    }
+
+    #[test]
+    fn test_expiry_bound_and_overflow_rejected() {
+        let (env, contract_id, owner, recipient, token) = setup_test();
+        let vault_client = ScheduleVaultClient::new(&env, &contract_id);
+
+        // Exactly at MAX_EXPIRY_OFFSET_LEDGERS is accepted
+        let boundary_expiry = 2000 + MAX_EXPIRY_OFFSET_LEDGERS;
+        let id = vault_client.create_vault(
+            &owner,
+            &recipient,
+            &token,
+            &1_000_000,
+            &2000,
+            &String::from_str(&env, "Boundary expiry"),
+            &Some(boundary_expiry),
+        );
+        assert_eq!(id, 1);
+
+        // One ledger past MAX_EXPIRY_OFFSET_LEDGERS is rejected
+        let res = vault_client.try_create_vault(
+            &owner,
+            &recipient,
+            &token,
+            &1_000_000,
+            &2000,
+            &String::from_str(&env, "Over max expiry"),
+            &Some(boundary_expiry + 1),
+        );
+        assert_eq!(res, Err(Ok(Error::ExpiryTooFarInFuture)));
     }
 }
