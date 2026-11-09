@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useWallet } from '@/lib/store';
 import { api, getApiErrorMessage } from '@/lib/api';
 import { DashboardSkeleton } from '@/components/Skeleton';
-import type { VaultEntry, StreamEntry, DCAEntry } from '@/types';
+import { statusLabel, type VaultEntry, type StreamEntry, type DCAEntry, type ScheduleEntryType } from '@/types';
 
 type Tab = 'vaults' | 'streams' | 'dca';
 
@@ -158,7 +158,7 @@ export default function DashboardPage() {
   );
 }
 
-function ItemList({ items, type }: { items: any[]; type: string }) {
+function ItemList({ items, type }: { items: any[]; type: ScheduleEntryType }) {
   if (items.length === 0) {
     return <p className="text-text-muted py-8 text-center">No {type} found.</p>;
   }
@@ -176,7 +176,7 @@ function ItemList({ items, type }: { items: any[]; type: string }) {
               <span className="text-sm font-mono text-text-muted">#{item.id}</span>
               <span className="ml-3 text-text-primary font-medium">{item.label}</span>
             </div>
-            <StatusBadge status={item.status} />
+            <StatusBadge status={item.status} type={type} />
           </div>
         </Link>
       ))}
@@ -184,7 +184,14 @@ function ItemList({ items, type }: { items: any[]; type: string }) {
   );
 }
 
-function StatusBadge({ status }: { status: string }) {
+function StatusBadge({
+  status,
+  type = 'vault',
+}: {
+  status: VaultEntry['status'] | StreamEntry['status'] | DCAEntry['status'];
+  type?: ScheduleEntryType;
+}) {
+  const label = statusLabel(status, type);
   const colors: Record<string, string> = {
     Active: 'bg-accent-green/10 text-accent-green border-accent-green/30',
     Released: 'bg-accent-blue/10 text-accent-blue border-accent-blue/30',
@@ -192,11 +199,12 @@ function StatusBadge({ status }: { status: string }) {
     Cancelled: 'bg-accent-red/10 text-accent-red border-accent-red/30',
     Exhausted: 'bg-accent-orange/10 text-accent-orange border-accent-orange/30',
     Paused: 'bg-accent-orange/10 text-accent-orange border-accent-orange/30',
+    Reclaimed: 'bg-accent-red/10 text-accent-red border-accent-red/30',
   };
 
   return (
-    <span className={`px-2 py-0.5 rounded text-xs font-medium border ${colors[status] || ''}`}>
-      {status}
+    <span className={px-2 py-0.5 rounded text-xs font-medium border ${colors[label] || ''}}>
+      {label}
     </span>
   );
 }

@@ -7,7 +7,7 @@ import { api, getApiErrorMessage } from '@/lib/api';
 import { useWallet } from '@/lib/store';
 import { TxToast } from '@/components/TxToast';
 import { DetailPageSkeleton } from '@/components/Skeleton';
-import type { StreamEntry } from '@/types';
+import { statusLabel, type StreamEntry } from '@/types';
 
 export default function StreamDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -106,15 +106,15 @@ export default function StreamDetailPage() {
         <DetailRow label="Recipient" value={stream.recipient} />
         <DetailRow label="Total Amount" value={stream.total_amount} />
         <DetailRow label="Claimed" value={stream.claimed_amount} />
-        {stream.status === 'Active' && stream.claimable_amount && (
+        {statusLabel(stream.status, 'stream') === 'Active' && stream.claimable_amount && (
           <DetailRow label="Claimable Now" value={stream.claimable_amount} />
         )}
         <DetailRow label="Progress" value={`${progress.toFixed(1)}%`} />
         <DetailRow label="End Ledger" value={String(stream.end_ledger)} />
-        <DetailRow label="Status" value={stream.status} />
+        <DetailRow label="Status" value={statusLabel(stream.status, 'stream')} />
       </div>
 
-      {stream.status === 'Active' && (
+      {statusLabel(stream.status, 'stream') === 'Active' && (
         <button
           onClick={() => setTxStatus('pending')}
           className="mt-6 w-full py-3 rounded-lg bg-accent-green text-white font-medium hover:opacity-90"

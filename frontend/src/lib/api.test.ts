@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { captureException } from "./sentry";
-import { ApiTimeoutError, fetchJSON, isAbortError } from "./api";
+import { api, ApiTimeoutError, fetchJSON, isAbortError, statusLabel } from "./api";
 vi.mock("./sentry", () => ({ captureException: vi.fn(), addBreadcrumb: vi.fn() }));
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -138,5 +138,81 @@ describe("API request deadlines", () => {
     });
     expect(removeListener).toHaveBeenCalledWith("abort", addListener.mock.calls[0][1]);
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe("Status ordinal normalization (#315)", () => {
+  it("maps every vault ordinal (0..4) including Paused and Reclaimed to display labels", () => {
+    expect(statusLabel(0, "vault")).toBe("Active");
+    expect(statusLabel(1, "vault")).toBe("Released");
+    expect(statusLabel(2, "vault")).toBe("Cancelled");
+    expect(statusLabel(3, "vault")).toBe("Paused");
+    expect(statusLabel(4, "vault")).toBe("Reclaimed");
+  });
+
+  it("maps every stream ordinal (0..3) including Paused to display labels", () => {
+    expect(statusLabel(0, "stream")).toBe("Active");
+    expect(statusLabel(1, "stream")).toBe("Paused");
+    expect(statusLabel(2, "stream")).toBe("Completed");
+    expect(statusLabel(3, "stream")).toBe("Cancelled");
+  });
+
+  it("maps every DCA ordinal (0..2) to display labels", () => {
+    expect(statusLabel(0, "dca")).toBe("Active");
+    expect(statusLabel(1, "dca")).toBe("Exhausted");
+    expect(statusLabel(2, "dca")).toBe("Cancelled");
+  });
+
+  it("normalizes numeric ordinals at the API boundary for getSchedules, getStreams, and getDCA", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [
+          { id: 1, status: 0, label: "V0" },
+          { id: 2, status: 1, label: "V1" },
+          { id: 3, status: 2, label: "V2" },
+          { id: 4, status: 3, label: "V3" },
+          { id: 5, status: 4, label: "V4" },
+        ],
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [
+          { id: 1, status: 0, label: "S0" },
+          { id: 2, status: 1, label: "S1" },
+          { id: 3, status: 2, label: "S2" },
+          { id: 4, status: 3, label: "S3" },
+        ],
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [
+          { id: 1, status: 0, label: "D0" },
+          { id: 2, status: 1, label: "D1" },
+          { id: 3, status: 2, label: "D2" },
+        ],
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const schedules = await api.getSchedules("GADDR");
+    expect(schedules.map((s) => s.status)).toEqual([
+      "Active",
+      "Released",
+      "Cancelled",
+      "Paused",
+      "Reclaimed",
+    ]);
+
+    const streams = await api.getStreams("GADDR");
+    expect(streams.map((s) => s.status)).toEqual([
+      "Active",
+      "Paused",
+      "Completed",
+      "Cancelled",
+    ]);
+
+    const dcas = await api.getDCA("GADDR");
+    expect(dcas.map((d) => d.status)).toEqual(["Active", "Exhausted", "Cancelled"]);
   });
 });

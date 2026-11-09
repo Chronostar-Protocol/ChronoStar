@@ -52,6 +52,21 @@ export function formatDCAStatus(status: DCAStatus): DCAStatusName {
   return status;
 }
 
+export type ScheduleEntryType = "vault" | "stream" | "dca";
+
+export function statusLabel(
+  status: VaultStatus | StreamStatus | DCAStatus,
+  type: ScheduleEntryType = "vault",
+): VaultStatusName | StreamStatusName | DCAStatusName {
+  if (type === "stream") {
+    return formatStreamStatus(status as StreamStatus);
+  }
+  if (type === "dca") {
+    return formatDCAStatus(status as DCAStatus);
+  }
+  return formatVaultStatus(status as VaultStatus);
+}
+
 export interface VaultEntry {
   id: number;
   owner: string;

@@ -7,7 +7,7 @@ import { api, getApiErrorMessage } from '@/lib/api';
 import { useWallet } from '@/lib/store';
 import { TxToast } from '@/components/TxToast';
 import { DetailPageSkeleton } from '@/components/Skeleton';
-import type { VaultEntry } from '@/types';
+import { statusLabel, type VaultEntry } from '@/types';
 
 export default function VaultDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -90,10 +90,10 @@ export default function VaultDetailPage() {
         <DetailRow label="Recipient" value={vault.recipient} />
         <DetailRow label="Amount" value={vault.amount} />
         <DetailRow label="Release Ledger" value={String(vault.release_ledger)} />
-        <DetailRow label="Status" value={vault.status} />
+        <DetailRow label="Status" value={statusLabel(vault.status, 'vault')} />
       </div>
 
-      {vault.status === 'Active' && (
+      {statusLabel(vault.status, 'vault') === 'Active' && (
         <button
           onClick={() => setTxStatus('pending')}
           className="mt-6 w-full py-3 rounded-lg bg-accent-red text-white font-medium hover:opacity-90"

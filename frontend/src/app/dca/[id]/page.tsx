@@ -7,7 +7,7 @@ import { api, getApiErrorMessage } from '@/lib/api';
 import { useWallet } from '@/lib/store';
 import { TxToast } from '@/components/TxToast';
 import { DetailPageSkeleton } from '@/components/Skeleton';
-import type { DCAEntry, DCAExecution } from '@/types';
+import { statusLabel, type DCAEntry, type DCAExecution } from '@/types';
 
 const HISTORY_PAGE_SIZE = 10;
 
@@ -136,7 +136,7 @@ export default function DCADetailPage() {
         <DetailRow label="Per Swap" value={dca.amount_per_swap} />
         <DetailRow label="Executions" value={`${completed} / ${totalExecs}`} />
         <DetailRow label="Next Execution" value={String(dca.next_execution_ledger)} />
-        <DetailRow label="Status" value={dca.status} />
+        <DetailRow label="Status" value={statusLabel(dca.status, 'dca')} />
       </div>
 
       <ExecutionHistory
@@ -148,7 +148,7 @@ export default function DCADetailPage() {
         onPageChange={setHistoryPage}
       />
 
-      {dca.status === 'Active' && (
+      {statusLabel(dca.status, 'dca') === 'Active' && (
         <button
           onClick={() => setTxStatus('pending')}
           className="mt-6 w-full py-3 rounded-lg bg-accent-red text-white font-medium hover:opacity-90"

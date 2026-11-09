@@ -1,12 +1,18 @@
-import type {
-  VaultEntry,
-  StreamEntry,
-  DCAEntry,
-  DCAExecutionHistory,
-  ScheduleEvent,
-  Stats,
+import {
+  formatVaultStatus,
+  formatStreamStatus,
+  formatDCAStatus,
+  statusLabel,
+  type VaultEntry,
+  type StreamEntry,
+  type DCAEntry,
+  type DCAExecutionHistory,
+  type ScheduleEvent,
+  type Stats,
 } from "@/types";
 import { captureException, addBreadcrumb } from "./sentry";
+
+export { statusLabel };
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
 const configuredTimeout = Number(process.env.NEXT_PUBLIC_API_TIMEOUT_MS);
@@ -59,7 +65,7 @@ export async function fetchJSON<T>(path: string, options: ApiRequestOptions = {}
   const timer = setTimeout(() => controller.abort(new ApiTimeoutError()), timeoutMs);
   try {
     const request = async (): Promise<T> => {
-      const res = await fetch(`${BASE_URL}${path}`, { signal: controller.signal });
+      const res = await fetch(``, { signal: controller.signal });
       if (!res.ok) throw new Error(`API ${res.status}: ${res.statusText}`);
       return (await res.json()) as T;
     };
@@ -76,12 +82,18 @@ export async function fetchJSON<T>(path: string, options: ApiRequestOptions = {}
 }
 
 export const api = {
-  getSchedules: (address: string, options?: ApiRequestOptions) =>
-    fetchJSON<VaultEntry[]>(`/api/schedules/${address}`, options),
-  getStreams: (address: string, options?: ApiRequestOptions) =>
-    fetchJSON<StreamEntry[]>(`/api/streams/${address}`, options),
-  getDCA: (address: string, options?: ApiRequestOptions) =>
-    fetchJSON<DCAEntry[]>(`/api/dca/${address}`, options),
+  getSchedules: async (address: string, options?: ApiRequestOptions): Promise<VaultEntry[]> => {
+    const entries = await fetchJSON<VaultEntry[]>(`/api/schedules/${address}`, options);
+    return entries.map((entry) => ({ ...entry, status: formatVaultStatus(entry.status) }));
+  },
+  getStreams: async (address: string, options?: ApiRequestOptions): Promise<StreamEntry[]> => {
+    const entries = await fetchJSON<StreamEntry[]>(`/api/streams/${address}`, options);
+    return entries.map((entry) => ({ ...entry, status: formatStreamStatus(entry.status) }));
+  },
+  getDCA: async (address: string, options?: ApiRequestOptions): Promise<DCAEntry[]> => {
+    const entries = await fetchJSON<DCAEntry[]>(`/api/dca/${address}`, options);
+    return entries.map((entry) => ({ ...entry, status: formatDCAStatus(entry.status) }));
+  },
   getDCAHistory: (
     address: string,
     dcaId: number,
