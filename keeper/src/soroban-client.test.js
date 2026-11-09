@@ -8,14 +8,16 @@ const TEST_CONTRACT = "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4"
 const TEST_ACCOUNT = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
 
 describe("SorobanClient", () => {
-  it("builds transaction with memo and returns correlationId and hash", async () => {
+  it("invokes contract, signs prepared transaction, and returns correlationId and hash", async () => {
     const client = new SorobanClient();
     client.sourceAccount = new Account(TEST_ACCOUNT, "1");
+    const signMock = mock.fn();
     client.sourceKeypair = {
       publicKey: () => TEST_ACCOUNT,
-      sign: () => {},
+      sign: signMock,
     };
 
+    client._buildTx = mock.fn(() => ({ built: true }));
     client.server = {
       getAccount: mock.fn(async () => new Account(TEST_ACCOUNT, "1")),
       simulateTransaction: mock.fn(async () => ({
@@ -29,7 +31,7 @@ describe("SorobanClient", () => {
     };
 
     client._assemble = mock.fn(() => ({
-      sign: () => {},
+      sign: (kp) => kp.sign(),
     }));
 
     const result = await client.invokeContract(
@@ -40,16 +42,58 @@ describe("SorobanClient", () => {
     );
     assert.strictEqual(result.hash, "txhash1234567890");
     assert.strictEqual(result.correlationId, "test-correlation-id-12345");
+    assert.strictEqual(client._buildTx.mock.callCount(), 1);
+    assert.strictEqual(
+      client._buildTx.mock.calls[0].arguments[4],
+      "test-correlation-id-12345",
+    );
     assert.strictEqual(client._assemble.mock.callCount(), 1);
+    assert.strictEqual(signMock.mock.callCount(), 1);
   });
 
-  it("refreshes source account sequence on submission failure", async () => {
+  it("polls getTransaction when sendTransaction returns PENDING", async () => {
+    const client = new SorobanClient();
+    client.sourceAccount = new Account(TEST_ACCOUNT, "1");
+    client.sourceKeypair = {
+      publicKey: () => TEST_ACCOUNT,
+      sign: () => {},
+    };
+    client._buildTx = mock.fn(() => ({ built: true }));
+    client._assemble = mock.fn(() => ({ sign: () => {} }));
+    client.server = {
+      simulateTransaction: mock.fn(async () => ({
+        result: { retval: null },
+        transactionData: {},
+      })),
+      sendTransaction: mock.fn(async () => ({
+        status: "PENDING",
+        hash: "pending_hash_001",
+      })),
+      getTransaction: mock.fn(async () => ({
+        status: "SUCCESS",
+        ledger: 1234,
+      })),
+    };
+
+    const result = await client.invokeContract(
+      TEST_CONTRACT,
+      "release",
+      [],
+      "corr-pending",
+    );
+    assert.strictEqual(result.hash, "pending_hash_001");
+    assert.strictEqual(result.status, "SUCCESS");
+    assert.strictEqual(result.correlationId, "corr-pending");
+    assert.strictEqual(client.server.getTransaction.mock.callCount(), 1);
+  });
+
+  it("refreshes source account sequence on submission failure and retries", async () => {
     const client = new SorobanClient();
     let getAccountCalls = 0;
 
     const originalAttempts = config.retryMaxAttempts;
     const originalDelay = config.retryBaseDelayMs;
-    config.retryMaxAttempts = 1;
+    config.retryMaxAttempts = 2;
     config.retryBaseDelayMs = 0;
 
     client.sourceKeypair = {
@@ -72,7 +116,8 @@ describe("SorobanClient", () => {
         () => client.invokeContract(TEST_CONTRACT, "test_method", []),
         /test_method simulation failed: sim_error/,
       );
-      assert.ok(getAccountCalls > 0);
+      assert.strictEqual(getAccountCalls, 2);
+      assert.strictEqual(client.server.simulateTransaction.mock.callCount(), 2);
     } finally {
       config.retryMaxAttempts = originalAttempts;
       config.retryBaseDelayMs = originalDelay;
