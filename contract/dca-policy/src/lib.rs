@@ -4,6 +4,8 @@ use soroban_sdk::{
     Address, Env, IntoVal, String, Symbol, Val, Vec,
 };
 
+const MAX_LABEL_LEN: u32 = 64;
+
 contractmeta!(key = "name", val = "ChronoStar DCA Policy");
 contractmeta!(key = "version", val = "0.1.0");
 contractmeta!(
@@ -23,6 +25,9 @@ pub enum Error {
     SwapResultedInZeroOutput = 7,
     SlippageShortfall = 8,
     CannotTopUpCancelledPolicy = 9,
+    LabelCannotBeEmpty = 10,
+    LabelCannotBeBlank = 11,
+    LabelTooLong = 12,
 }
 
 /// Upper bound on how many records a single `get_execution_history` call returns.
@@ -74,6 +79,8 @@ pub enum DCAStatus {
 pub struct DCACreated {
     pub owner: Address,
     pub next_execution_ledger: u32,
+}
+
 /// A single recorded swap execution, keyed by (dca_id, index) where index is
 /// 1-based and matches `DCAEntry::executions_completed` at write time.
 #[contracttype]
@@ -87,6 +94,26 @@ pub struct ExecutionRecord {
     pub remaining_budget: i128,
     pub next_execution_ledger: u32,
     pub swapped: bool,
+}
+
+fn validate_label(label: &String) -> Result<(), Error> {
+    let len = label.len();
+    if len == 0 {
+        return Err(Error::LabelCannotBeEmpty);
+    }
+    if len > MAX_LABEL_LEN {
+        return Err(Error::LabelTooLong);
+    }
+    let mut buf = [0u8; 64];
+    let slice = &mut buf[..len as usize];
+    label.copy_into_slice(slice);
+    let non_ws = slice
+        .iter()
+        .any(|&b| b != b' ' && b != b'\t' && b != b'\n' && b != b'\r');
+    if !non_ws {
+        return Err(Error::LabelCannotBeBlank);
+    }
+    Ok(())
 }
 
 #[contract]
@@ -144,6 +171,7 @@ impl DCAPolicy {
         if interval_ledgers < 120 {
             return Err(Error::MinimumIntervalIs120Ledgers);
         }
+        validate_label(&label)?;
 
         let token_client = token::Client::new(&env, &token_in);
         token_client.transfer_from(
@@ -394,7 +422,12 @@ impl DCAPolicy {
     /// 1-based `start` index. `limit` is clamped to `MAX_HISTORY_PAGE`.
     /// Returns an empty vec when the DCA has no executions or `start` is past
     /// the end of history.
-    pub fn get_execution_history(env: Env, dca_id: u64, start: u32, limit: u32) -> Vec<ExecutionRecord> {
+    pub fn get_execution_history(
+        env: Env,
+        dca_id: u64,
+        start: u32,
+        limit: u32,
+    ) -> Vec<ExecutionRecord> {
         let dca: DCAEntry = env
             .storage()
             .persistent()
@@ -838,8 +871,14 @@ mod test {
             assert_eq!(record.dca_id, dca_id);
             assert_eq!(record.amount_in, 100_000);
             assert_eq!(record.amount_out, 100_000);
-            assert_eq!(record.remaining_budget, 500_000 - (100_000 * expected_index as i128));
-            assert_eq!(record.ledger, 1000 + (expected_index as u32 - 1) * 120 + 120);
+            assert_eq!(
+                record.remaining_budget,
+                500_000 - (100_000 * expected_index as i128)
+            );
+            assert_eq!(
+                record.ledger,
+                1000 + (expected_index - 1) * 120 + 120
+            );
             assert!(!record.swapped);
         }
 
@@ -905,7 +944,7 @@ mod test {
         }
 
         let clamped = dca_client.get_execution_history(&dca_id, &1, &10_000);
-        assert!(clamped.len() as u32 <= MAX_HISTORY_PAGE);
+        assert!(clamped.len() <= MAX_HISTORY_PAGE);
 
         let zero_limit = dca_client.get_execution_history(&dca_id, &1, &0);
         assert_eq!(zero_limit.len(), 0);
@@ -914,6 +953,7 @@ mod test {
     #[test]
     fn test_execution_history_records_swapped_flag() {
         let (env, contract_id, owner, swap_receiver, token_in) = setup_test();
+        env.mock_all_auths_allowing_non_root_auth();
         let dca_client = DCAPolicyClient::new(&env, &contract_id);
 
         let router_id = env.register(MockRouter, ());
@@ -986,8 +1026,6 @@ mod test {
     #[test]
     fn test_execute_swap_with_router() {
         let (env, contract_id, owner, swap_receiver, token_in) = setup_test();
-        // The router mints output tokens from a nested invocation, which needs
-        // auth that is not tied to the root `execute_swap` call.
         env.mock_all_auths_allowing_non_root_auth();
         let dca_client = DCAPolicyClient::new(&env, &contract_id);
 
@@ -998,8 +1036,6 @@ mod test {
             .register_stellar_asset_contract_v2(token_out_admin.clone())
             .address();
 
-        // The router is only invoked after the ledger has been advanced past its
-        // default instance TTL, so bump it here to keep the entry alive.
         env.as_contract(&router_id, || {
             env.storage().instance().extend_ttl(6_312_000, 6_312_000);
         });
@@ -1035,40 +1071,49 @@ mod test {
         assert_eq!(dca.last_swap_output, 95_010);
     }
 
-    #[contract]
-    pub struct MockBreachingRouter;
+    mod breaching_router {
+        use super::*;
 
-    #[contractimpl]
-    impl MockBreachingRouter {
-        pub fn swap(
-            env: Env,
-            _from: Address,
-            to: Address,
-            _token_in: Address,
-            token_out: Address,
-            _amount_in: i128,
-            min_amount_out: i128,
-        ) -> i128 {
-            let token_out_admin_client = TokenAdminClient::new(&env, &token_out);
-            let output = min_amount_out - 10; // breach slippage
-            if output > 0 {
-                token_out_admin_client.mint(&to, &output);
+        #[contract]
+        pub struct MockBreachingRouter;
+
+        #[contractimpl]
+        impl MockBreachingRouter {
+            pub fn swap(
+                env: Env,
+                _from: Address,
+                to: Address,
+                _token_in: Address,
+                token_out: Address,
+                _amount_in: i128,
+                min_amount_out: i128,
+            ) -> i128 {
+                let token_out_admin_client = TokenAdminClient::new(&env, &token_out);
+                let output = min_amount_out - 10; // breach slippage
+                if output > 0 {
+                    token_out_admin_client.mint(&to, &output);
+                }
+                output
             }
-            output
         }
     }
 
     #[test]
-    #[should_panic(expected = "slippage shortfall")]
+    #[should_panic(expected = "Error(Contract, #8)")]
     fn test_execute_swap_with_breaching_router() {
         let (env, contract_id, owner, swap_receiver, token_in) = setup_test();
+        env.mock_all_auths_allowing_non_root_auth();
         let dca_client = DCAPolicyClient::new(&env, &contract_id);
 
-        let router_id = env.register(MockBreachingRouter, ());
+        let router_id = env.register(breaching_router::MockBreachingRouter, ());
         let token_out_admin = Address::generate(&env);
         let token_out = env
             .register_stellar_asset_contract_v2(token_out_admin.clone())
             .address();
+
+        env.as_contract(&router_id, || {
+            env.storage().instance().extend_ttl(6_312_000, 6_312_000);
+        });
 
         let dca_id = dca_client.create_dca_swap(
             &owner,
@@ -1097,35 +1142,43 @@ mod test {
         dca_client.execute_swap(&dca_id);
     }
 
-    #[contract]
-    pub struct MockZeroRouter;
+    mod zero_router {
+        use super::*;
 
-    #[contractimpl]
-    impl MockZeroRouter {
-        pub fn swap(
-            _env: Env,
-            _from: Address,
-            _to: Address,
-            _token_in: Address,
-            _token_out: Address,
-            _amount_in: i128,
-            _min_amount_out: i128,
-        ) -> i128 {
-            0
+        #[contract]
+        pub struct MockZeroRouter;
+
+        #[contractimpl]
+        impl MockZeroRouter {
+            pub fn swap(
+                _env: Env,
+                _from: Address,
+                _to: Address,
+                _token_in: Address,
+                _token_out: Address,
+                _amount_in: i128,
+                _min_amount_out: i128,
+            ) -> i128 {
+                0
+            }
         }
     }
 
     #[test]
-    #[should_panic(expected = "swap resulted in zero output")]
+    #[should_panic(expected = "Error(Contract, #7)")]
     fn test_execute_swap_with_zero_router() {
         let (env, contract_id, owner, swap_receiver, token_in) = setup_test();
         let dca_client = DCAPolicyClient::new(&env, &contract_id);
 
-        let router_id = env.register(MockZeroRouter, ());
+        let router_id = env.register(zero_router::MockZeroRouter, ());
         let token_out_admin = Address::generate(&env);
         let token_out = env
             .register_stellar_asset_contract_v2(token_out_admin.clone())
             .address();
+
+        env.as_contract(&router_id, || {
+            env.storage().instance().extend_ttl(6_312_000, 6_312_000);
+        });
 
         let dca_id = dca_client.create_dca_swap(
             &owner,
@@ -1135,7 +1188,7 @@ mod test {
             &swap_receiver,
             &1_000_000,
             &100_000,
-            &0, 
+            &0,
             &1440,
             &String::from_str(&env, "Router DCA"),
         );
@@ -1152,5 +1205,123 @@ mod test {
         });
 
         dca_client.execute_swap(&dca_id);
+    }
+
+    #[test]
+    fn test_label_empty() {
+        let (env, contract_id, owner, swap_receiver, token) = setup_test();
+        let dca_client = DCAPolicyClient::new(&env, &contract_id);
+
+        let res1 = dca_client.try_create_dca(
+            &owner,
+            &token,
+            &swap_receiver,
+            &1_000_000,
+            &100_000,
+            &1440,
+            &String::from_str(&env, ""),
+        );
+        assert_eq!(res1, Err(Ok(Error::LabelCannotBeEmpty)));
+
+        let res2 = dca_client.try_create_dca_swap(
+            &owner,
+            &token,
+            &None,
+            &None,
+            &swap_receiver,
+            &1_000_000,
+            &100_000,
+            &0,
+            &1440,
+            &String::from_str(&env, ""),
+        );
+        assert_eq!(res2, Err(Ok(Error::LabelCannotBeEmpty)));
+    }
+
+    #[test]
+    fn test_label_whitespace_only() {
+        let (env, contract_id, owner, swap_receiver, token) = setup_test();
+        let dca_client = DCAPolicyClient::new(&env, &contract_id);
+
+        let res1 = dca_client.try_create_dca(
+            &owner,
+            &token,
+            &swap_receiver,
+            &1_000_000,
+            &100_000,
+            &1440,
+            &String::from_str(&env, "   \t\n"),
+        );
+        assert_eq!(res1, Err(Ok(Error::LabelCannotBeBlank)));
+
+        let res2 = dca_client.try_create_dca_swap(
+            &owner,
+            &token,
+            &None,
+            &None,
+            &swap_receiver,
+            &1_000_000,
+            &100_000,
+            &0,
+            &1440,
+            &String::from_str(&env, "   \t\n"),
+        );
+        assert_eq!(res2, Err(Ok(Error::LabelCannotBeBlank)));
+    }
+
+    #[test]
+    fn test_label_exactly_64() {
+        let (env, contract_id, owner, swap_receiver, token) = setup_test();
+        let dca_client = DCAPolicyClient::new(&env, &contract_id);
+
+        let label = String::from_str(
+            &env,
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        );
+        let id = dca_client.create_dca(
+            &owner,
+            &token,
+            &swap_receiver,
+            &1_000_000,
+            &100_000,
+            &1440,
+            &label,
+        );
+        assert_eq!(id, 1);
+    }
+
+    #[test]
+    fn test_label_65_chars() {
+        let (env, contract_id, owner, swap_receiver, token) = setup_test();
+        let dca_client = DCAPolicyClient::new(&env, &contract_id);
+
+        let over_long = String::from_str(
+            &env,
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        );
+        let res1 = dca_client.try_create_dca(
+            &owner,
+            &token,
+            &swap_receiver,
+            &1_000_000,
+            &100_000,
+            &1440,
+            &over_long,
+        );
+        assert_eq!(res1, Err(Ok(Error::LabelTooLong)));
+
+        let res2 = dca_client.try_create_dca_swap(
+            &owner,
+            &token,
+            &None,
+            &None,
+            &swap_receiver,
+            &1_000_000,
+            &100_000,
+            &0,
+            &1440,
+            &over_long,
+        );
+        assert_eq!(res2, Err(Ok(Error::LabelTooLong)));
     }
 }
