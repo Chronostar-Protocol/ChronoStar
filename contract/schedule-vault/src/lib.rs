@@ -502,6 +502,70 @@ impl ScheduleVault {
         Ok(())
     }
 
+    /// Scans up to `limit` (clamped to `MAX_BATCH_SIZE`) eligible vaults owned
+    /// by `owner`, reclaims every `Active` or `Paused` vault whose
+    /// `expires_after_ledger` has passed (`current_ledger > expiry`), and
+    /// returns the reclaimed vault ids.
+    pub fn reclaim_expired(env: Env, owner: Address, limit: u32) -> Vec<u64> {
+        owner.require_auth();
+        let cap = limit.min(MAX_BATCH_SIZE);
+        let mut reclaimed_ids: Vec<u64> = Vec::new(&env);
+        if cap == 0 {
+            return reclaimed_ids;
+        }
+
+        let owner_vaults: Vec<u64> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::VaultsByOwner(owner.clone()))
+            .unwrap_or(Vec::new(&env));
+        let current_ledger = env.ledger().sequence();
+
+        for vault_id in owner_vaults.iter() {
+            if reclaimed_ids.len() >= cap {
+                break;
+            }
+            let Some(mut vault) = env
+                .storage()
+                .persistent()
+                .get::<_, VaultEntry>(&DataKey::Vault(vault_id))
+            else {
+                continue;
+            };
+            if vault.owner != owner {
+                continue;
+            }
+            if vault.status != VaultStatus::Active && vault.status != VaultStatus::Paused {
+                continue;
+            }
+            let Some(expiry) = vault.expires_after_ledger else {
+                continue;
+            };
+            if current_ledger <= expiry {
+                continue;
+            }
+
+            vault.status = VaultStatus::Reclaimed;
+            vault.paused_at_ledger = None;
+            env.storage()
+                .persistent()
+                .set(&DataKey::Vault(vault_id), &vault);
+            env.storage()
+                .persistent()
+                .extend_ttl(&DataKey::Vault(vault_id), 6_312_000, 6_312_000);
+
+            let token_client = token::Client::new(&env, &vault.token);
+            token_client.transfer(&env.current_contract_address(), &vault.owner, &vault.amount);
+
+            env.events()
+                .publish((symbol_short!("reclaimed"), vault_id), vault.owner.clone());
+
+            reclaimed_ids.push_back(vault_id);
+        }
+
+        reclaimed_ids
+    }
+
     pub fn get_vault(env: Env, vault_id: u64) -> Option<VaultEntry> {
         env.storage().persistent().get(&DataKey::Vault(vault_id))
     }
@@ -921,7 +985,7 @@ mod test {
     }
 
     #[test]
-    #[should_panic(expected = "label cannot be empty")]
+    #[should_panic(expected = "Error(Contract, #3)")]
     fn test_label_empty() {
         let (env, contract_id, owner, recipient, token) = setup_test();
         let vault_client = ScheduleVaultClient::new(&env, &contract_id);
@@ -937,7 +1001,7 @@ mod test {
     }
 
     #[test]
-    #[should_panic(expected = "label cannot be blank")]
+    #[should_panic(expected = "Error(Contract, #4)")]
     fn test_label_whitespace_only() {
         let (env, contract_id, owner, recipient, token) = setup_test();
         let vault_client = ScheduleVaultClient::new(&env, &contract_id);
@@ -967,7 +1031,7 @@ mod test {
     }
 
     #[test]
-    #[should_panic(expected = "label max 64 chars")]
+    #[should_panic(expected = "Error(Contract, #5)")]
     fn test_label_65_chars() {
         let (env, contract_id, owner, recipient, token) = setup_test();
         let vault_client = ScheduleVaultClient::new(&env, &contract_id);
@@ -1013,5 +1077,79 @@ mod test {
 
         let vault = vault_client.get_vault(&vault_id).unwrap();
         assert_eq!(vault.owner, new_owner);
+    }
+
+    #[test]
+    fn test_reclaim_expired_sweeps_only_expired_vaults_with_limit() {
+        let (env, contract_id, owner, recipient, token) = setup_test();
+        let vault_client = ScheduleVaultClient::new(&env, &contract_id);
+
+        // Vault 1: expires after 2500
+        let v1 = vault_client.create_vault(
+            &owner,
+            &recipient,
+            &token,
+            &1_000_000,
+            &2000,
+            &String::from_str(&env, "Expired 1"),
+            &Some(2500),
+        );
+        // Vault 2: no expiry
+        let v2 = vault_client.create_vault(
+            &owner,
+            &recipient,
+            &token,
+            &1_000_000,
+            &2000,
+            &String::from_str(&env, "No expiry"),
+            &None,
+        );
+        // Vault 3: expires after 4000 (not yet expired at ledger 3001)
+        let v3 = vault_client.create_vault(
+            &owner,
+            &recipient,
+            &token,
+            &1_000_000,
+            &2000,
+            &String::from_str(&env, "Future expiry"),
+            &Some(4000),
+        );
+        // Vault 4: paused and expires after 2600
+        let v4 = vault_client.create_vault(
+            &owner,
+            &recipient,
+            &token,
+            &1_000_000,
+            &2000,
+            &String::from_str(&env, "Paused expired"),
+            &Some(2600),
+        );
+        vault_client.pause(&v4);
+
+        env.ledger().set(LedgerInfo {
+            protocol_version: 22,
+            sequence_number: 3001,
+            timestamp: 0,
+            network_id: [0u8; 32],
+            base_reserve: 0,
+            min_persistent_entry_ttl: 1000,
+            min_temp_entry_ttl: 1000,
+            max_entry_ttl: 6_312_000,
+        });
+
+        // Bounded sweep with limit = 1 reclaims only v1 first
+        let page1 = vault_client.reclaim_expired(&owner, &1);
+        assert_eq!(page1.len(), 1);
+        assert_eq!(page1.get(0).unwrap(), v1);
+        assert_eq!(vault_client.get_vault(&v1).unwrap().status, VaultStatus::Reclaimed);
+        assert_eq!(vault_client.get_vault(&v4).unwrap().status, VaultStatus::Paused);
+
+        // Next sweep reclaims v4 and leaves v2 and v3 untouched
+        let page2 = vault_client.reclaim_expired(&owner, &10);
+        assert_eq!(page2.len(), 1);
+        assert_eq!(page2.get(0).unwrap(), v4);
+        assert_eq!(vault_client.get_vault(&v4).unwrap().status, VaultStatus::Reclaimed);
+        assert_eq!(vault_client.get_vault(&v2).unwrap().status, VaultStatus::Active);
+        assert_eq!(vault_client.get_vault(&v3).unwrap().status, VaultStatus::Active);
     }
 }
