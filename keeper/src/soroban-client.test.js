@@ -8,7 +8,10 @@ const TEST_CONTRACT = "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4"
 const TEST_ACCOUNT = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
 
 describe("SorobanClient", () => {
-  it("builds transaction with memo and returns correlationId and hash", async () => {
+  it("exposes refreshAccount and invokeContract as top-level class methods", async () => {
+    assert.strictEqual(typeof SorobanClient.prototype.refreshAccount, "function");
+    assert.strictEqual(typeof SorobanClient.prototype.invokeContract, "function");
+
     const client = new SorobanClient();
     client.sourceAccount = new Account(TEST_ACCOUNT, "1");
     client.sourceKeypair = {
