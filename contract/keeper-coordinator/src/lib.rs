@@ -14,7 +14,12 @@ contractmeta!(
     val = "Exclusive claim ledger that stops two keepers executing the same schedule"
 );
 
-
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DataKey {
+    Keeper(Address),
+    Claim(Symbol, u64),
+}
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -65,9 +70,13 @@ impl KeeperCoordinator {
 
         let key = DataKey::Claim(resource.clone(), id);
         let now = env.ledger().sequence();
+        let mut previous_expired_keeper: Option<Address> = None;
         if let Some(existing) = env.storage().persistent().get::<_, Claim>(&key) {
             if existing.expires_at > now && existing.keeper != keeper {
                 return false;
+            }
+            if existing.expires_at <= now && existing.keeper != keeper {
+                previous_expired_keeper = Some(existing.keeper);
             }
         }
 
@@ -82,6 +91,12 @@ impl KeeperCoordinator {
         env.storage()
             .persistent()
             .extend_ttl(&key, STORAGE_TTL_LEDGERS, STORAGE_TTL_LEDGERS);
+        if let Some(previous_keeper) = previous_expired_keeper {
+            env.events().publish(
+                (symbol_short!("takeover"), resource.clone(), id),
+                (previous_keeper, keeper.clone(), expires_at),
+            );
+        }
         env.events().publish(
             (symbol_short!("claimed"), resource, id),
             (keeper, expires_at),
@@ -114,7 +129,8 @@ impl KeeperCoordinator {
 #[cfg(test)]
 mod test {
     use super::*;
-    use soroban_sdk::testutils::{Address as _, Ledger};
+    use soroban_sdk::testutils::{Address as _, Events, Ledger};
+    use soroban_sdk::{vec, IntoVal};
 
     #[test]
     fn two_keepers_contend_and_expiry_restores_liveness() {
@@ -148,5 +164,86 @@ mod test {
         client.register(&keeper);
         assert!(client.claim(&symbol_short!("vault"), &1, &keeper, &5));
         assert!(client.claim(&symbol_short!("dca"), &1, &keeper, &5));
+    }
+
+    #[test]
+    fn first_claim_renewal_and_takeover_emit_expected_events() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract = env.register(KeeperCoordinator, ());
+        let client = KeeperCoordinatorClient::new(&env, &contract);
+        let first = Address::generate(&env);
+        let second = Address::generate(&env);
+        client.register(&first);
+        client.register(&second);
+
+        let resource = symbol_short!("stream");
+        let id = 7u64;
+
+        // 1. First claim: emits `claimed`, no `takeover`.
+        env.ledger().set_sequence_number(100);
+        assert!(client.claim(&resource, &id, &first, &10));
+        assert_eq!(
+            env.events().all(),
+            vec![
+                &env,
+                (
+                    contract.clone(),
+                    (symbol_short!("claimed"), resource.clone(), id).into_val(&env),
+                    (first.clone(), 110u32).into_val(&env),
+                ),
+            ]
+        );
+
+        // 2. Renewal by the same keeper before expiry: emits `claimed`, no `takeover`.
+        env.ledger().set_sequence_number(105);
+        assert!(client.claim(&resource, &id, &first, &10));
+        assert_eq!(
+            env.events().all(),
+            vec![
+                &env,
+                (
+                    contract.clone(),
+                    (symbol_short!("claimed"), resource.clone(), id).into_val(&env),
+                    (first.clone(), 115u32).into_val(&env),
+                ),
+            ]
+        );
+
+        // 3. Renewal by the same keeper after expiry: emits `claimed`, no `takeover`.
+        env.ledger().set_sequence_number(120);
+        assert!(client.claim(&resource, &id, &first, &10));
+        assert_eq!(
+            env.events().all(),
+            vec![
+                &env,
+                (
+                    contract.clone(),
+                    (symbol_short!("claimed"), resource.clone(), id).into_val(&env),
+                    (first.clone(), 130u32).into_val(&env),
+                ),
+            ]
+        );
+
+        // 4. Takeover by a different keeper after the previous claim expired:
+        //    emits both `takeover` (with previous_keeper, new_keeper, expires_at) and `claimed`.
+        env.ledger().set_sequence_number(130);
+        assert!(client.claim(&resource, &id, &second, &10));
+        assert_eq!(
+            env.events().all(),
+            vec![
+                &env,
+                (
+                    contract.clone(),
+                    (symbol_short!("takeover"), resource.clone(), id).into_val(&env),
+                    (first.clone(), second.clone(), 140u32).into_val(&env),
+                ),
+                (
+                    contract.clone(),
+                    (symbol_short!("claimed"), resource.clone(), id).into_val(&env),
+                    (second.clone(), 140u32).into_val(&env),
+                ),
+            ]
+        );
     }
 }

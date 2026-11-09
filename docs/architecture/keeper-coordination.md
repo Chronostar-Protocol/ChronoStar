@@ -14,7 +14,7 @@ The `keeper-coordinator` Soroban contract stores:
 
 Any address may register itself, supporting a future permissionless keeper set. Registration and claim acquisition require that address's authorization. `claim(resource, id, keeper, ttl_ledgers)` succeeds when no live claim exists, when the previous claim has expired, or when the same keeper renews it. TTL must be non-zero and is capped to limit accidental long-lived locks. A claim is live while `current_ledger < expires_at`; therefore a crashed keeper can delay work only until that explicit ledger.
 
-The contract emits registration, claim, and release events. Claims use persistent storage and extend their storage TTL beyond the logical lock TTL; logical expiry never depends on Soroban entry eviction.
+The contract emits registration, claim, takeover, and release events. When a claim succeeds because a previous claim held by a different keeper has expired, the contract publishes a `takeover` event carrying `(previous_keeper, new_keeper, expires_at)` in addition to the standard `claimed` event so operators can distinguish expiry-driven handovers from initial claims and renewals. Claims use persistent storage and extend their storage TTL beyond the logical lock TTL; logical expiry never depends on Soroban entry eviction.
 
 ## Keeper flow
 
