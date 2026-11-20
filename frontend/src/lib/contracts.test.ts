@@ -1,5 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
+import { Account, rpc, Transaction } from "@stellar/stellar-sdk";
 import {
+  buildAndSignContractTx,
   validateIntegerAmount,
   validateReleaseLedger,
   createVaultTx,
@@ -74,8 +76,8 @@ describe("Network Passphrase Default Agreement", () => {
 describe("Transaction Builder & Contract Functions", () => {
   const sender = "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H";
   const recipient = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN7";
-  const token = "CA3D5KRYMCMCZVAC7OHQHGNO2QQ74YOGJGXRO2CX6PYYBCR4ACMO5SC6";
-  const contractId = "CA3D5KRYMCMCZVAC7OHQHGNO2QQ74YOGJGXRO2CX6PYYBCR4ACMO5SC6";
+  const token = "CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE";
+  const contractId = "CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE";
 
   const validVaultParams = {
     recipient,
@@ -84,24 +86,56 @@ describe("Transaction Builder & Contract Functions", () => {
     releaseLedger: "2000000",
     label: "Test Vault",
   };
+  const successfulSubmitter = () => vi.fn(async () => ({ hash: "ab".repeat(32) }));
 
-  it("builds, simulates, and signs create_vault transaction via signer", async () => {
-    const signerMock = vi.fn(async ({ xdr }: { xdr: string; networkPassphrase?: string }) => xdr);
+  it("builds and wallet-signs create_vault before submitting it", async () => {
+    const signerMock = vi.fn(async (xdr: string) => xdr);
+    const submitter = successfulSubmitter();
     const result = await createVaultTx(sender, validVaultParams, {
       signer: signerMock,
+      submitter,
       contractId,
       skipSimulation: true,
     });
 
-    expect(result.hash).toBeDefined();
-    expect(result.hash.length).toBe(64); // 32-byte hex hash
+    expect(result.hash).toBe("ab".repeat(32));
     expect(result.xdr).toBeDefined();
-    expect(signerMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        networkPassphrase: "Test SDF Network ; September 2015",
-        xdr: expect.any(String),
-      }),
+    expect(signerMock).toHaveBeenCalledWith(expect.any(String), {
+      networkPassphrase: "Test SDF Network ; September 2015",
+    });
+    expect(submitter).toHaveBeenCalledWith(result.xdr);
+    expect(signerMock.mock.invocationCallOrder[0]).toBeLessThan(
+      submitter.mock.invocationCallOrder[0],
     );
+  });
+
+  it("prepares and submits through Soroban RPC when no submitter override is provided", async () => {
+    const server = new rpc.Server("https://soroban-testnet.stellar.org");
+    const getAccount = vi
+      .spyOn(server, "getAccount")
+      .mockResolvedValue(new Account(sender, "0"));
+    const prepareTransaction = vi
+      .spyOn(server, "prepareTransaction")
+      .mockImplementation(async (transaction) => transaction as Transaction);
+    const hash = "cd".repeat(32);
+    const sendTransaction = vi.spyOn(server, "sendTransaction").mockResolvedValue({
+      status: "PENDING",
+      hash,
+      latestLedger: 100,
+      latestLedgerCloseTime: 0,
+    });
+    const signer = vi.fn(async (xdr: string) => xdr);
+
+    const result = await buildAndSignContractTx(sender, contractId, "test", [], {
+      signer,
+      server,
+    });
+
+    expect(result.hash).toBe(hash);
+    expect(getAccount).toHaveBeenCalledWith(sender);
+    expect(prepareTransaction).toHaveBeenCalledOnce();
+    expect(signer).toHaveBeenCalledOnce();
+    expect(sendTransaction).toHaveBeenCalledOnce();
   });
 
   it("surfaces amount validation errors before building tx", async () => {
@@ -132,85 +166,117 @@ describe("Transaction Builder & Contract Functions", () => {
   });
 
   it("builds and signs claimVaultTx", async () => {
-    const signerMock = vi.fn(async ({ xdr }: { xdr: string }) => xdr);
+    const signerMock = vi.fn(async (xdr: string) => xdr);
+    const submitter = successfulSubmitter();
     const result = await claimVaultTx(recipient, 42n, {
       signer: signerMock,
+      submitter,
       contractId,
       skipSimulation: true,
     });
 
     expect(result.hash.length).toBe(64);
     expect(signerMock).toHaveBeenCalled();
+    expect(submitter).toHaveBeenCalled();
   });
 
   it("builds and signs cancelVaultTx", async () => {
-    const signerMock = vi.fn(async ({ xdr }: { xdr: string }) => xdr);
+    const signerMock = vi.fn(async (xdr: string) => xdr);
+    const submitter = successfulSubmitter();
     const result = await cancelVaultTx(sender, 42n, {
       signer: signerMock,
+      submitter,
       contractId,
       skipSimulation: true,
     });
 
     expect(result.hash.length).toBe(64);
     expect(signerMock).toHaveBeenCalled();
+    expect(submitter).toHaveBeenCalled();
   });
 
   it("builds and signs createStreamTx", async () => {
-    const signerMock = vi.fn(async ({ xdr }: { xdr: string }) => xdr);
+    const signerMock = vi.fn(async (xdr: string) => xdr);
+    const submitter = successfulSubmitter();
     const result = await createStreamTx(
       sender,
       {
         recipient,
         token,
-        ratePerLedger: "100",
-        startLedger: "1000",
-        endLedger: "2000",
-        deposit: "100000",
+        totalAmount: "100000",
+        durationLedgers: "2000",
         label: "Stream 1",
       },
       {
         signer: signerMock,
+        submitter,
         contractId,
         skipSimulation: true,
       },
     );
 
-    expect(result.hash.length).toBe(64);
+    expect(result.hash).toBe("ab".repeat(32));
     expect(signerMock).toHaveBeenCalled();
+    expect(submitter).toHaveBeenCalledWith(result.xdr);
   });
 
-  it("rejects createStreamTx when endLedger <= startLedger", async () => {
+  it("rejects createStreamTx with a non-positive duration", async () => {
     await expect(
       createStreamTx(sender, {
         recipient,
         token,
-        ratePerLedger: "100",
-        startLedger: "2000",
-        endLedger: "1000",
-        deposit: "100000",
+        totalAmount: "100000",
+        durationLedgers: "0",
       }),
-    ).rejects.toThrow("end_ledger must be strictly greater than start_ledger");
+    ).rejects.toThrow("duration_ledgers must be greater than zero");
   });
 
   it("builds and signs createDcaTx", async () => {
-    const signerMock = vi.fn(async ({ xdr }: { xdr: string }) => xdr);
+    const signerMock = vi.fn(async (xdr: string) => xdr);
+    const submitter = successfulSubmitter();
     const result = await createDcaTx(
       sender,
       {
         tokenIn: token,
-        tokenOut: "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
-        amountPerTrade: "500",
-        intervalLedgers: "10",
-        totalTrades: "5",
+        swapReceiver: recipient,
+        totalBudget: "2500",
+        amountPerSwap: "500",
+        intervalLedgers: "120",
+        label: "DCA 1",
       },
       {
         signer: signerMock,
+        submitter,
         contractId,
         skipSimulation: true,
       },
     );
 
-    expect(result.hash.length).toBe(64);
+    expect(result.hash).toBe("ab".repeat(32));
     expect(signerMock).toHaveBeenCalled();
+    expect(submitter).toHaveBeenCalledWith(result.xdr);
+  });
+
+  it("rejects DCA budgets that are not an exact multiple of the swap amount", async () => {
+    await expect(
+      createDcaTx(sender, {
+        tokenIn: token,
+        swapReceiver: recipient,
+        totalBudget: "2501",
+        amountPerSwap: "500",
+        intervalLedgers: "120",
+      }),
+    ).rejects.toThrow("total_budget must be an exact multiple of amount_per_swap");
+  });
+
+  it("rejects submissions without a valid returned transaction hash", async () => {
+    await expect(
+      createVaultTx(sender, validVaultParams, {
+        signer: async (xdr) => xdr,
+        submitter: async () => ({ hash: "" }),
+        contractId,
+        skipSimulation: true,
+      }),
+    ).rejects.toThrow("Transaction submission did not return a valid transaction hash");
   });
 });

@@ -6,7 +6,6 @@ import { api, getApiErrorMessage } from '@/lib/api';
 import { LedgerClock } from '@/components/LedgerClock';
 import { ExplorerSkeleton } from '@/components/Skeleton';
 import { ledgersToHuman } from '@/lib/utils';
-import { ExplorerSkeleton } from '@/components/Skeleton';
 import type { ScheduleEvent } from '@/types';
 
 function ErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {

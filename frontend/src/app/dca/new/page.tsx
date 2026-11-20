@@ -15,12 +15,35 @@ export default function CreateDCAPage() {
   const [intervalLedgers, setIntervalLedgers] = useState('');
   const [label, setLabel] = useState('');
   const [txStatus, setTxStatus] = useState<null | 'pending' | 'success' | 'error'>(null);
+  const [txHash, setTxHash] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | undefined>();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!address || txStatus === 'pending') return;
+
     setTxStatus('pending');
-    setTxStatus('success');
-    setTimeout(() => router.push('/dashboard'), 1500);
+    setTxHash(null);
+    setErrorMessage(undefined);
+
+    try {
+      const { createDcaTx } = await import('@/lib/contracts');
+      const { hash } = await createDcaTx(address, {
+        tokenIn,
+        swapReceiver,
+        totalBudget,
+        amountPerSwap,
+        intervalLedgers,
+        label,
+      });
+      if (!hash) throw new Error('Transaction submission did not return a hash');
+      setTxHash(hash);
+      setTxStatus('success');
+      setTimeout(() => router.push('/dashboard?tab=dca'), 1500);
+    } catch (error: unknown) {
+      setTxStatus('error');
+      setErrorMessage(error instanceof Error ? error.message : 'Transaction failed');
+    }
   };
 
   if (!isConnected) {
@@ -37,14 +60,23 @@ export default function CreateDCAPage() {
         <Field label="Amount Per Swap" type="number" value={amountPerSwap} onChange={setAmountPerSwap} placeholder="100000" />
         <Field label="Interval (ledgers)" type="number" value={intervalLedgers} onChange={setIntervalLedgers} placeholder="e.g. 1440" />
         <Field label="Label" value={label} onChange={setLabel} placeholder="Weekly XLM DCA" maxLength={64} />
+        {errorMessage && (
+          <p role="alert" className="text-sm text-accent-red">{errorMessage}</p>
+        )}
         <button
           type="submit"
-          className="w-full py-3 rounded-lg bg-accent-orange text-white font-medium hover:opacity-90 transition-opacity"
+          disabled={txStatus === 'pending'}
+          className="w-full py-3 rounded-lg bg-accent-orange text-white font-medium hover:opacity-90 disabled:opacity-50 transition-opacity"
         >
-          Create DCA Policy
+          {txStatus === 'pending' ? 'Submitting...' : 'Create DCA Policy'}
         </button>
       </form>
-      <TxToast status={txStatus} message={txStatus === 'success' ? 'DCA policy created!' : undefined} onClose={() => setTxStatus(null)} />
+      <TxToast
+        status={txStatus}
+        hash={txHash}
+        message={txStatus === 'success' ? 'DCA policy created!' : errorMessage}
+        onClose={() => setTxStatus(null)}
+      />
     </div>
   );
 }

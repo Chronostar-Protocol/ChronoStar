@@ -14,12 +14,34 @@ export default function CreateStreamPage() {
   const [duration, setDuration] = useState('');
   const [label, setLabel] = useState('');
   const [txStatus, setTxStatus] = useState<null | 'pending' | 'success' | 'error'>(null);
+  const [txHash, setTxHash] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | undefined>();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!address || txStatus === 'pending') return;
+
     setTxStatus('pending');
-    setTxStatus('success');
-    setTimeout(() => router.push('/dashboard'), 1500);
+    setTxHash(null);
+    setErrorMessage(undefined);
+
+    try {
+      const { createStreamTx } = await import('@/lib/contracts');
+      const { hash } = await createStreamTx(address, {
+        recipient,
+        token,
+        totalAmount,
+        durationLedgers: duration,
+        label,
+      });
+      if (!hash) throw new Error('Transaction submission did not return a hash');
+      setTxHash(hash);
+      setTxStatus('success');
+      setTimeout(() => router.push('/dashboard?tab=streams'), 1500);
+    } catch (error: unknown) {
+      setTxStatus('error');
+      setErrorMessage(error instanceof Error ? error.message : 'Transaction failed');
+    }
   };
 
   if (!isConnected) {
@@ -35,14 +57,23 @@ export default function CreateStreamPage() {
         <Field label="Total Amount" type="number" value={totalAmount} onChange={setTotalAmount} placeholder="1000000" />
         <Field label="Duration (ledgers)" type="number" value={duration} onChange={setDuration} placeholder="e.g. 1440 (~2 hrs)" />
         <Field label="Label" value={label} onChange={setLabel} placeholder="Salary stream" maxLength={64} showCounter />
+        {errorMessage && (
+          <p role="alert" className="text-sm text-accent-red">{errorMessage}</p>
+        )}
         <button
           type="submit"
-          className="w-full py-3 rounded-lg bg-accent-green text-white font-medium hover:opacity-90 transition-opacity"
+          disabled={txStatus === 'pending'}
+          className="w-full py-3 rounded-lg bg-accent-green text-white font-medium hover:opacity-90 disabled:opacity-50 transition-opacity"
         >
-          Create Stream
+          {txStatus === 'pending' ? 'Submitting...' : 'Create Stream'}
         </button>
       </form>
-      <TxToast status={txStatus} message={txStatus === 'success' ? 'Stream created!' : undefined} onClose={() => setTxStatus(null)} />
+      <TxToast
+        status={txStatus}
+        hash={txHash}
+        message={txStatus === 'success' ? 'Stream created!' : errorMessage}
+        onClose={() => setTxStatus(null)}
+      />
     </div>
   );
 }
