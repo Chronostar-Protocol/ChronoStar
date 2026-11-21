@@ -67,6 +67,13 @@ export default function DashboardPage() {
     return () => activeRequest.current?.abort();
   }, [fetchData]);
 
+  useEffect(() => {
+    const requestedTab = new URLSearchParams(window.location.search).get('tab');
+    if (requestedTab === 'vaults' || requestedTab === 'streams' || requestedTab === 'dca') {
+      setTab(requestedTab);
+    }
+  }, []);
+
   if (!isConnected) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] text-center px-4">
