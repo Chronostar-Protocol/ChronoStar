@@ -131,6 +131,8 @@ export interface ScheduleEvent {
   remainingLedgers: number;
 }
 
+export type ScheduleRoleFilter = "all" | "sent" | "received";
+
 export interface Stats {
   vaults: { total: number; active: number; released: number; paused?: number; reclaimed?: number };
   streams: { total: number; active: number; completed: number; paused?: number };

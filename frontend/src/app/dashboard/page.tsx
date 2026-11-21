@@ -1,11 +1,11 @@
 'use client';
 
 import Link from 'next/link';
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useWallet } from '@/lib/store';
 import { api, getApiErrorMessage } from '@/lib/api';
 import { DashboardSkeleton } from '@/components/Skeleton';
-import type { VaultEntry, StreamEntry, DCAEntry } from '@/types';
+import type { VaultEntry, StreamEntry, DCAEntry, ScheduleRoleFilter } from '@/types';
 
 type Tab = 'vaults' | 'streams' | 'dca';
 
@@ -30,6 +30,7 @@ function ErrorState({ message, onRetry }: { message: string; onRetry: () => void
 export default function DashboardPage() {
   const { address, isConnected } = useWallet();
   const [tab, setTab] = useState<Tab>('vaults');
+  const [roleFilter, setRoleFilter] = useState<ScheduleRoleFilter>('all');
   const [vaults, setVaults] = useState<VaultEntry[]>([]);
   const [streams, setStreams] = useState<StreamEntry[]>([]);
   const [dcas, setDcas] = useState<DCAEntry[]>([]);
@@ -73,6 +74,27 @@ export default function DashboardPage() {
       setTab(requestedTab);
     }
   }, []);
+
+  const filteredVaults = useMemo(() => {
+    if (roleFilter === 'all') return vaults;
+    if (roleFilter === 'sent') return address ? vaults.filter((v) => v.owner === address) : vaults;
+    if (roleFilter === 'received') return address ? vaults.filter((v) => v.recipient === address) : vaults;
+    return vaults;
+  }, [vaults, roleFilter, address]);
+
+  const filteredStreams = useMemo(() => {
+    if (roleFilter === 'all') return streams;
+    if (roleFilter === 'sent') return address ? streams.filter((s) => s.owner === address) : streams;
+    if (roleFilter === 'received') return address ? streams.filter((s) => s.recipient === address) : streams;
+    return streams;
+  }, [streams, roleFilter, address]);
+
+  const filteredDcas = useMemo(() => {
+    // DCA schedules are strictly owner-configured automated swap policies.
+    if (roleFilter === 'received') return [];
+    if (roleFilter === 'sent') return address ? dcas.filter((d) => d.owner === address) : dcas;
+    return dcas;
+  }, [dcas, roleFilter, address]);
 
   if (!isConnected) {
     return (
@@ -125,9 +147,15 @@ export default function DashboardPage() {
   }
 
   const tabs: { key: Tab; label: string; count: number; newLink: string }[] = [
-    { key: 'vaults', label: 'Vaults', count: vaults.length, newLink: '/vault/new' },
-    { key: 'streams', label: 'Streams', count: streams.length, newLink: '/stream/new' },
-    { key: 'dca', label: 'DCA', count: dcas.length, newLink: '/dca/new' },
+    { key: 'vaults', label: 'Vaults', count: filteredVaults.length, newLink: '/vault/new' },
+    { key: 'streams', label: 'Streams', count: filteredStreams.length, newLink: '/stream/new' },
+    { key: 'dca', label: 'DCA', count: filteredDcas.length, newLink: '/dca/new' },
+  ];
+
+  const roleFilterOptions: { key: ScheduleRoleFilter; label: string }[] = [
+    { key: 'all', label: 'All Roles' },
+    { key: 'sent', label: 'Sent (Outgoing)' },
+    { key: 'received', label: 'Received (Incoming)' },
   ];
 
   return (
@@ -142,51 +170,130 @@ export default function DashboardPage() {
         </Link>
       </div>
 
-      <div className="flex gap-1 border-b border-border mb-6">
-        {tabs.map(t => (
-          <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
-            className={`px-4 py-2 text-sm font-medium transition-colors ${
-              tab === t.key
-                ? 'text-accent-blue border-b-2 border-accent-blue'
-                : 'text-text-muted hover:text-text-primary'
-            }`}
-          >
-            {t.label} ({t.count})
-          </button>
-        ))}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-border mb-6 pb-2 sm:pb-0">
+        <div className="flex gap-1">
+          {tabs.map(t => (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              className={`px-4 py-2 text-sm font-medium transition-colors ${
+                tab === t.key
+                  ? 'text-accent-blue border-b-2 border-accent-blue'
+                  : 'text-text-muted hover:text-text-primary'
+              }`}
+            >
+              {t.label} ({t.count})
+            </button>
+          ))}
+        </div>
+
+        <div className="flex items-center gap-1 bg-bg-card p-1 rounded-lg border border-border self-start sm:self-auto mb-2 sm:mb-0">
+          {roleFilterOptions.map(option => (
+            <button
+              key={option.key}
+              onClick={() => setRoleFilter(option.key)}
+              data-testid={`role-filter-${option.key}`}
+              className={`px-3 py-1 rounded text-xs font-medium transition-all ${
+                roleFilter === option.key
+                  ? 'bg-accent-blue text-white shadow-sm'
+                  : 'text-text-muted hover:text-text-primary hover:bg-bg-elevated'
+              }`}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {tab === 'vaults' && <ItemList items={vaults} type="vault" />}
-      {tab === 'streams' && <ItemList items={streams} type="stream" />}
-      {tab === 'dca' && <ItemList items={dcas} type="dca" />}
+      {tab === 'dca' && roleFilter === 'received' ? (
+        <div className="p-6 rounded-lg border border-border bg-bg-card text-center text-text-muted text-sm py-12">
+          <p className="font-medium text-text-primary mb-1">No incoming DCA schedules</p>
+          <p>DCA schedules are owner-managed automated swap strategies and do not have incoming recipient roles.</p>
+        </div>
+      ) : (
+        <>
+          {tab === 'vaults' && <ItemList items={filteredVaults} type="vault" currentAddress={address || ''} />}
+          {tab === 'streams' && <ItemList items={filteredStreams} type="stream" currentAddress={address || ''} />}
+          {tab === 'dca' && <ItemList items={filteredDcas} type="dca" currentAddress={address || ''} />}
+        </>
+      )}
     </div>
   );
 }
 
-function ItemList({ items, type }: { items: any[]; type: string }) {
+function ItemList({ items, type, currentAddress }: { items: any[]; type: string; currentAddress: string }) {
   if (items.length === 0) {
     return <p className="text-text-muted py-8 text-center">No {type} found.</p>;
   }
 
   return (
     <div className="space-y-3">
-      {items.map((item) => (
-        <Link
-          key={item.id}
-          href={`/${type}/${item.id}`}
-          className="block p-4 rounded-lg border border-border bg-bg-card hover:bg-bg-elevated transition-colors"
-        >
-          <div className="flex items-center justify-between">
-            <div>
-              <span className="text-sm font-mono text-text-muted">#{item.id}</span>
-              <span className="ml-3 text-text-primary font-medium">{item.label}</span>
+      {items.map((item) => {
+        const isDcaOwner =
+          type === 'dca' &&
+          Boolean(currentAddress) &&
+          item.owner === currentAddress;
+
+        const isSelfDirected =
+          type !== 'dca' &&
+          Boolean(currentAddress) &&
+          item.owner === currentAddress &&
+          item.recipient === currentAddress;
+
+        const isOutgoing =
+          type !== 'dca' &&
+          Boolean(currentAddress) &&
+          item.owner === currentAddress &&
+          item.recipient !== currentAddress;
+
+        const isIncoming =
+          type !== 'dca' &&
+          Boolean(currentAddress) &&
+          item.recipient === currentAddress &&
+          item.owner !== currentAddress;
+
+        return (
+          <Link
+            key={item.id}
+            href={`/${type}/${item.id}`}
+            className="block p-4 rounded-lg border border-border bg-bg-card hover:bg-bg-elevated transition-colors"
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <span className="text-sm font-mono text-text-muted">#{item.id}</span>
+                <span className="text-text-primary font-medium">{item.label}</span>
+                {isDcaOwner && (
+                  <span
+                    className="px-2 py-0.5 rounded text-xs font-medium border bg-bg-elevated text-text-muted border-border"
+                    title="DCA schedule owned and managed by wallet"
+                  >
+                    Owner
+                  </span>
+                )}
+                {isSelfDirected && (
+                  <span
+                    className="px-2 py-0.5 rounded text-xs font-medium border bg-accent-blue/10 text-accent-blue border-accent-blue/30"
+                    title="Self-directed schedule (wallet is both owner and recipient)"
+                  >
+                    Self-directed
+                  </span>
+                )}
+                {isOutgoing && (
+                  <span className="px-2 py-0.5 rounded text-xs font-medium border bg-bg-elevated text-text-muted border-border">
+                    Outgoing
+                  </span>
+                )}
+                {isIncoming && (
+                  <span className="px-2 py-0.5 rounded text-xs font-medium border bg-accent-green/10 text-accent-green border-accent-green/30">
+                    Incoming
+                  </span>
+                )}
+              </div>
+              <StatusBadge status={item.status} />
             </div>
-            <StatusBadge status={item.status} />
-          </div>
-        </Link>
-      ))}
+          </Link>
+        );
+      })}
     </div>
   );
 }
