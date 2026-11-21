@@ -1,7 +1,7 @@
 import { describe, it, mock } from "node:test";
 import assert from "node:assert";
-import { Account, Keypair } from "@stellar/stellar-sdk";
-import { SorobanClient } from "./soroban-client.js";
+import { Account, Keypair, xdr } from "@stellar/stellar-sdk";
+import { LedgerStalledError, SorobanClient } from "./soroban-client.js";
 import { config } from "./config.js";
 
 const TEST_CONTRACT = "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4";
@@ -41,6 +41,80 @@ describe("SorobanClient", () => {
     assert.strictEqual(result.hash, "txhash1234567890");
     assert.strictEqual(result.correlationId, "test-correlation-id-12345");
     assert.strictEqual(client._assemble.mock.callCount(), 1);
+  });
+
+  it("suspends submissions on a stalled ledger and resumes after forward progress", async () => {
+    let now = 1_000;
+    let ledger = 100;
+    const originalStallDuration = config.maxLedgerStallMs;
+    config.maxLedgerStallMs = 100;
+
+    const client = new SorobanClient({ now: () => now });
+    client.sourceAccount = new Account(TEST_ACCOUNT, "1");
+    client.sourceKeypair = { publicKey: () => TEST_ACCOUNT, sign: () => {} };
+    client.server = {
+      simulateTransaction: mock.fn(async () => ({
+        latestLedger: ledger,
+        result: { retval: xdr.ScVal.scvVoid() },
+        transactionData: {},
+      })),
+      sendTransaction: mock.fn(async () => ({ status: "SUCCESS", hash: "txhash" })),
+    };
+    client._assemble = mock.fn(() => ({ sign: () => {} }));
+
+    try {
+      assert.equal(client.ledgerStatus().status, "unknown");
+      await client.readContract(TEST_CONTRACT, "current_ledger", []);
+      assert.equal(client.ledgerStatus().status, "healthy");
+
+      now += 100;
+      await client.readContract(TEST_CONTRACT, "current_ledger", []);
+      assert.equal(client.ledgerStatus().status, "stalled");
+      await assert.rejects(
+        client.invokeContract(TEST_CONTRACT, "submit", []),
+        LedgerStalledError,
+      );
+      assert.equal(client.server.sendTransaction.mock.callCount(), 0);
+
+      ledger += 1;
+      await client.readContract(TEST_CONTRACT, "current_ledger", []);
+      assert.equal(client.ledgerStatus().status, "healthy");
+      await client.invokeContract(TEST_CONTRACT, "submit", []);
+      assert.equal(client.server.sendTransaction.mock.callCount(), 1);
+    } finally {
+      config.maxLedgerStallMs = originalStallDuration;
+    }
+  });
+
+  it("does not report an RPC transport failure as a ledger stall", async () => {
+    let now = 1_000;
+    let shouldFail = true;
+    const client = new SorobanClient({ now: () => now });
+    const originalStallDuration = config.maxLedgerStallMs;
+    config.maxLedgerStallMs = 100;
+    client.server = {
+      simulateTransaction: mock.fn(async () => {
+        if (shouldFail) throw new Error("RPC unavailable");
+        return { latestLedger: 100, result: { retval: xdr.ScVal.scvVoid() }, transactionData: {} };
+      }),
+    };
+    try {
+      await assert.rejects(client.readContract(TEST_CONTRACT, "current_ledger", []), /RPC unavailable/);
+      assert.equal(client.ledgerStatus().status, "transport_error");
+
+      shouldFail = false;
+      await client.readContract(TEST_CONTRACT, "current_ledger", []);
+      now += 100;
+      shouldFail = true;
+      await assert.rejects(client.readContract(TEST_CONTRACT, "current_ledger", []), /RPC unavailable/);
+      assert.equal(client.ledgerStatus().status, "transport_error");
+
+      shouldFail = false;
+      await client.readContract(TEST_CONTRACT, "current_ledger", []);
+      assert.equal(client.ledgerStatus().status, "stalled");
+    } finally {
+      config.maxLedgerStallMs = originalStallDuration;
+    }
   });
 
   it("refreshes source account sequence on submission failure", async () => {
