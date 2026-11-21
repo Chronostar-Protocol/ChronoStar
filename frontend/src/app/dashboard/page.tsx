@@ -1,18 +1,20 @@
-'use client';
+"use client";
 
-import Link from 'next/link';
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { useWallet } from '@/lib/store';
-import { api, getApiErrorMessage } from '@/lib/api';
-import { DashboardSkeleton } from '@/components/Skeleton';
-import type { VaultEntry, StreamEntry, DCAEntry } from '@/types';
+import Link from "next/link";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { useWallet } from "@/lib/store";
+import { api, getApiErrorMessage } from "@/lib/api";
+import { DashboardSkeleton } from "@/components/Skeleton";
+import type { VaultEntry, StreamEntry, DCAEntry } from "@/types";
 
-type Tab = 'vaults' | 'streams' | 'dca';
+type Tab = "vaults" | "streams" | "dca";
 
 function ErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
     <div className="text-center py-16">
-      <div className="text-4xl mb-3" aria-hidden="true">&#9888;</div>
+      <div className="text-4xl mb-3" aria-hidden="true">
+        &#9888;
+      </div>
       <h2 className="text-lg font-heading font-bold text-text-primary mb-2">
         Something went wrong
       </h2>
@@ -29,38 +31,98 @@ function ErrorState({ message, onRetry }: { message: string; onRetry: () => void
 
 export default function DashboardPage() {
   const { address, isConnected } = useWallet();
-  const [tab, setTab] = useState<Tab>('vaults');
+  const [tab, setTab] = useState<Tab>("vaults");
   const [vaults, setVaults] = useState<VaultEntry[]>([]);
   const [streams, setStreams] = useState<StreamEntry[]>([]);
   const [dcas, setDcas] = useState<DCAEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const activeRequest = useRef<AbortController | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const fetchData = useCallback(() => {
-    activeRequest.current?.abort();
-    const controller = new AbortController();
-    activeRequest.current = controller;
-    if (!address) { setLoading(false); return; }
+  // Freshness & manual refresh state
+  const [lastLoadedAt, setLastLoadedAt] = useState<Date | null>(null);
+  const lastLoadedAtRef = useRef<Date | null>(null);
+  const [isStale, setIsStale] = useState<boolean>(false);
+  const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+
+  const activeRequest = useRef<AbortController | null>(null);
+  const latestRequestedAddress = useRef<string | null>(null);
+
+  // Reset freshness and cached data when active wallet address switches
+  useEffect(() => {
+    setLastLoadedAt(null);
+    lastLoadedAtRef.current = null;
+    setIsStale(false);
+    setRefreshError(null);
     setError(null);
-    setLoading(true);
-    const options = { signal: controller.signal };
-    Promise.all([
-      api.getSchedules(address, options),
-      api.getStreams(address, options),
-      api.getDCA(address, options),
-    ])
-      .then(([v, s, d]) => {
-        if (controller.signal.aborted) return;
-        setVaults(v); setStreams(s); setDcas(d);
-      })
-      .catch((err) => {
-        if (!controller.signal.aborted) setError(getApiErrorMessage(err));
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
-      });
   }, [address]);
+
+  const fetchData = useCallback(
+    (isManual = false) => {
+      activeRequest.current?.abort();
+      const controller = new AbortController();
+      activeRequest.current = controller;
+
+      if (!address) {
+        setLoading(false);
+        setIsRefreshing(false);
+        return;
+      }
+
+      const currentAddress = address;
+      latestRequestedAddress.current = currentAddress;
+
+      // Full skeleton loading only on initial load without existing retained records
+      if (!lastLoadedAtRef.current && !isManual) {
+        setLoading(true);
+        setError(null);
+      } else {
+        setIsRefreshing(true);
+      }
+      setRefreshError(null);
+
+      const options = { signal: controller.signal };
+      Promise.all([
+        api.getSchedules(currentAddress, options),
+        api.getStreams(currentAddress, options),
+        api.getDCA(currentAddress, options),
+      ])
+        .then(([v, s, d]) => {
+          if (controller.signal.aborted || latestRequestedAddress.current !== currentAddress) {
+            return;
+          }
+          const now = new Date();
+          setVaults(v);
+          setStreams(s);
+          setDcas(d);
+          setLastLoadedAt(now);
+          lastLoadedAtRef.current = now;
+          setIsStale(false);
+          setRefreshError(null);
+          setError(null);
+        })
+        .catch((err) => {
+          if (controller.signal.aborted || latestRequestedAddress.current !== currentAddress) {
+            return;
+          }
+          const msg = getApiErrorMessage(err);
+          // If previous data exists, retain it, flag as stale, and preserve the previous success timestamp
+          if (lastLoadedAtRef.current) {
+            setIsStale(true);
+            setRefreshError(msg);
+          } else {
+            setError(msg);
+          }
+        })
+        .finally(() => {
+          if (!controller.signal.aborted && latestRequestedAddress.current === currentAddress) {
+            setLoading(false);
+            setIsRefreshing(false);
+          }
+        });
+    },
+    [address],
+  );
 
   useEffect(() => {
     fetchData();
@@ -68,8 +130,8 @@ export default function DashboardPage() {
   }, [fetchData]);
 
   useEffect(() => {
-    const requestedTab = new URLSearchParams(window.location.search).get('tab');
-    if (requestedTab === 'vaults' || requestedTab === 'streams' || requestedTab === 'dca') {
+    const requestedTab = new URLSearchParams(window.location.search).get("tab");
+    if (requestedTab === "vaults" || requestedTab === "streams" || requestedTab === "dca") {
       setTab(requestedTab);
     }
   }, []);
@@ -87,14 +149,19 @@ export default function DashboardPage() {
             strokeWidth={1.5}
             aria-hidden="true"
           >
-            <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a2.25 2.25 0 00-2.25-2.25H15a3 3 0 11-6 0H5.25A2.25 2.25 0 003 12m18 0v6a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 18v-6m18 0V9M3 12V9m18 0a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 9m18 0V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v3" />
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M21 12a2.25 2.25 0 00-2.25-2.25H15a3 3 0 11-6 0H5.25A2.25 2.25 0 003 12m18 0v6a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 18v-6m18 0V9M3 12V9m18 0a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 9m18 0V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v3"
+            />
           </svg>
         </div>
         <h1 className="text-2xl font-heading font-bold text-text-primary mb-2">
           Connect Your Wallet
         </h1>
         <p className="text-text-muted max-w-sm mb-6">
-          Link your Freighter wallet to view your vaults, streams, and DCA policies on the Stellar network.
+          Link your Freighter wallet to view your vaults, streams, and DCA policies on the Stellar
+          network.
         </p>
         <div className="flex flex-col sm:flex-row gap-3 items-center">
           <a
@@ -116,41 +183,110 @@ export default function DashboardPage() {
     );
   }
 
-  if (error) {
-    return <ErrorState message={error} onRetry={fetchData} />;
+  if (error && !lastLoadedAt) {
+    return <ErrorState message={error} onRetry={() => fetchData(true)} />;
   }
 
-  if (loading) {
+  if (loading && !lastLoadedAt) {
     return <DashboardSkeleton />;
   }
 
   const tabs: { key: Tab; label: string; count: number; newLink: string }[] = [
-    { key: 'vaults', label: 'Vaults', count: vaults.length, newLink: '/vault/new' },
-    { key: 'streams', label: 'Streams', count: streams.length, newLink: '/stream/new' },
-    { key: 'dca', label: 'DCA', count: dcas.length, newLink: '/dca/new' },
+    { key: "vaults", label: "Vaults", count: vaults.length, newLink: "/vault/new" },
+    { key: "streams", label: "Streams", count: streams.length, newLink: "/stream/new" },
+    { key: "dca", label: "DCA", count: dcas.length, newLink: "/dca/new" },
   ];
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-heading font-bold text-text-primary">Dashboard</h1>
-        <Link
-          href={tabs.find(t => t.key === tab)?.newLink || '/vault/new'}
-          className="px-4 py-2 rounded-lg bg-accent-blue text-white text-sm font-medium hover:opacity-90 transition-opacity"
-        >
-          New {tab === 'vaults' ? 'Vault' : tab === 'streams' ? 'Stream' : 'DCA'}
-        </Link>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+        <div>
+          <h1 className="text-2xl font-heading font-bold text-text-primary">Dashboard</h1>
+          {lastLoadedAt && (
+            <div
+              data-testid="data-freshness"
+              className="flex items-center gap-2 mt-1 text-xs text-text-muted"
+            >
+              <span>
+                Last updated:{" "}
+                <time dateTime={lastLoadedAt.toISOString()}>
+                  {lastLoadedAt.toLocaleTimeString([], {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    second: "2-digit",
+                  })}
+                </time>
+              </span>
+              {isStale && (
+                <span
+                  data-testid="stale-indicator"
+                  className="px-2 py-0.5 rounded text-[11px] font-medium bg-accent-orange/10 text-accent-orange border border-accent-orange/30"
+                >
+                  ⚠️ Out of date
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => fetchData(true)}
+            disabled={loading || isRefreshing}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border bg-bg-card text-text-muted text-sm font-medium hover:text-text-primary hover:bg-bg-elevated transition-colors disabled:opacity-50"
+            aria-label="Refresh dashboard data"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              className={`w-4 h-4 ${isRefreshing ? "animate-spin" : ""}`}
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+              aria-hidden="true"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"
+              />
+            </svg>
+            <span>{isRefreshing ? "Refreshing…" : "Refresh"}</span>
+          </button>
+
+          <Link
+            href={tabs.find((t) => t.key === tab)?.newLink || "/vault/new"}
+            className="px-4 py-2 rounded-lg bg-accent-blue text-white text-sm font-medium hover:opacity-90 transition-opacity"
+          >
+            New {tab === "vaults" ? "Vault" : tab === "streams" ? "Stream" : "DCA"}
+          </Link>
+        </div>
       </div>
 
+      {refreshError && isStale && (
+        <div
+          data-testid="refresh-error-banner"
+          className="mb-4 p-3 rounded-lg bg-accent-orange/10 border border-accent-orange/30 text-accent-orange text-sm flex items-center justify-between"
+        >
+          <span>Could not refresh dashboard data ({refreshError}). Showing cached records.</span>
+          <button
+            onClick={() => fetchData(true)}
+            className="underline font-medium hover:opacity-80"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
       <div className="flex gap-1 border-b border-border mb-6">
-        {tabs.map(t => (
+        {tabs.map((t) => (
           <button
             key={t.key}
             onClick={() => setTab(t.key)}
             className={`px-4 py-2 text-sm font-medium transition-colors ${
               tab === t.key
-                ? 'text-accent-blue border-b-2 border-accent-blue'
-                : 'text-text-muted hover:text-text-primary'
+                ? "text-accent-blue border-b-2 border-accent-blue"
+                : "text-text-muted hover:text-text-primary"
             }`}
           >
             {t.label} ({t.count})
@@ -158,9 +294,9 @@ export default function DashboardPage() {
         ))}
       </div>
 
-      {tab === 'vaults' && <ItemList items={vaults} type="vault" />}
-      {tab === 'streams' && <ItemList items={streams} type="stream" />}
-      {tab === 'dca' && <ItemList items={dcas} type="dca" />}
+      {tab === "vaults" && <ItemList items={vaults} type="vault" />}
+      {tab === "streams" && <ItemList items={streams} type="stream" />}
+      {tab === "dca" && <ItemList items={dcas} type="dca" />}
     </div>
   );
 }
@@ -193,16 +329,16 @@ function ItemList({ items, type }: { items: any[]; type: string }) {
 
 function StatusBadge({ status }: { status: string }) {
   const colors: Record<string, string> = {
-    Active: 'bg-accent-green/10 text-accent-green border-accent-green/30',
-    Released: 'bg-accent-blue/10 text-accent-blue border-accent-blue/30',
-    Completed: 'bg-accent-blue/10 text-accent-blue border-accent-blue/30',
-    Cancelled: 'bg-accent-red/10 text-accent-red border-accent-red/30',
-    Exhausted: 'bg-accent-orange/10 text-accent-orange border-accent-orange/30',
-    Paused: 'bg-accent-orange/10 text-accent-orange border-accent-orange/30',
+    Active: "bg-accent-green/10 text-accent-green border-accent-green/30",
+    Released: "bg-accent-blue/10 text-accent-blue border-accent-blue/30",
+    Completed: "bg-accent-blue/10 text-accent-blue border-accent-blue/30",
+    Cancelled: "bg-accent-red/10 text-accent-red border-accent-red/30",
+    Exhausted: "bg-accent-orange/10 text-accent-orange border-accent-orange/30",
+    Paused: "bg-accent-orange/10 text-accent-orange border-accent-orange/30",
   };
 
   return (
-    <span className={`px-2 py-0.5 rounded text-xs font-medium border ${colors[status] || ''}`}>
+    <span className={`px-2 py-0.5 rounded text-xs font-medium border ${colors[status] || ""}`}>
       {status}
     </span>
   );
