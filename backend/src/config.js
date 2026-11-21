@@ -62,6 +62,8 @@ export function validateConfig(cfg = config) {
       `Invalid backend configuration:\n${problems.map((p) => `  - ${p}`).join('\n')}`,
     );
   }
+}
+
 function parseTrustProxy(value) {
   if (value === undefined || value === '') {
     return process.env.NODE_ENV === 'production' ? 1 : false;
