@@ -1,0 +1,9 @@
+[
+  {
+    "type": "vault",
+    "id": 1,
+    "targetLedger": 1000
+  },
+  {
+    "type": "stream",
+    "id": "st-42"

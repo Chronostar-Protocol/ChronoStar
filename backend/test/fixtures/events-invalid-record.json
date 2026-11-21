@@ -1,0 +1,11 @@
+[
+  {
+    "type": "vault",
+    "id": 1,
+    "targetLedger": 1000
+  },
+  {
+    "type": "vault",
+    "id": 2
+  }
+]

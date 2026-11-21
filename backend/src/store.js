@@ -4,6 +4,81 @@ import { dirname, resolve } from 'node:path';
 const DEFAULT_PATH = resolve(process.env.EVENT_STORE_PATH || 'data/events.json');
 
 /**
+ * Corruption error thrown when persisted event file is not valid JSON.
+ */
+export class EventStoreCorruptionError extends Error {
+  constructor(message, filePath, cause) {
+    super(message);
+    this.name = 'EventStoreCorruptionError';
+    this.code = 'ERR_EVENT_STORE_CORRUPT_JSON';
+    this.filePath = filePath;
+    this.cause = cause;
+  }
+}
+
+/**
+ * Validation error thrown when persisted event records fail schema validation.
+ */
+export class EventStoreValidationError extends Error {
+  constructor(message, filePath, index = null, field = null) {
+    super(message);
+    this.name = 'EventStoreValidationError';
+    this.code = 'ERR_EVENT_STORE_INVALID_RECORD';
+    this.filePath = filePath;
+    this.index = index;
+    this.field = field;
+  }
+}
+
+/**
+ * Validate that an event record matches expected structure.
+ */
+export function validateEventRecord(record, index, filePath) {
+  if (!record || typeof record !== 'object' || Array.isArray(record)) {
+    throw new EventStoreValidationError(
+      `Invalid event record at index ${index} in "${filePath}": record must be an object`,
+      filePath,
+      index,
+      'record'
+    );
+  }
+  if (!record.type || typeof record.type !== 'string' || !record.type.trim()) {
+    throw new EventStoreValidationError(
+      `Invalid event record at index ${index} in "${filePath}": missing or invalid field 'type'`,
+      filePath,
+      index,
+      'type'
+    );
+  }
+  if (
+    record.id === undefined ||
+    record.id === null ||
+    (typeof record.id !== 'string' && typeof record.id !== 'number' && typeof record.id !== 'bigint')
+  ) {
+    throw new EventStoreValidationError(
+      `Invalid event record at index ${index} in "${filePath}": missing or invalid field 'id'`,
+      filePath,
+      index,
+      'id'
+    );
+  }
+  if (
+    record.targetLedger === undefined ||
+    record.targetLedger === null ||
+    (typeof record.targetLedger !== 'number' && typeof record.targetLedger !== 'string') ||
+    (typeof record.targetLedger === 'number' && (!Number.isFinite(record.targetLedger) || record.targetLedger <= 0))
+  ) {
+    throw new EventStoreValidationError(
+      `Invalid event record at index ${index} in "${filePath}": missing or invalid field 'targetLedger'`,
+      filePath,
+      index,
+      'targetLedger'
+    );
+  }
+  return true;
+}
+
+/**
  * Base abstract EventStore interface.
  */
 export class BaseEventStore {
@@ -36,14 +111,42 @@ export class FileEventStore extends BaseEventStore {
 
   async load() {
     if (this.events) return this.events;
+    let contents;
     try {
-      const contents = await readFile(this.filePath, 'utf8');
-      const parsed = JSON.parse(contents);
-      this.events = Array.isArray(parsed) ? parsed : [];
+      contents = await readFile(this.filePath, 'utf8');
     } catch (error) {
-      if (error.code !== 'ENOENT') throw error;
-      this.events = [];
+      if (error.code === 'ENOENT') {
+        this.events = [];
+        return this.events;
+      }
+      throw error;
     }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(contents);
+    } catch (error) {
+      throw new EventStoreCorruptionError(
+        `Malformed JSON in "${this.filePath}": ${error.message}`,
+        this.filePath,
+        error
+      );
+    }
+
+    if (!Array.isArray(parsed)) {
+      throw new EventStoreValidationError(
+        `Invalid event store structure in "${this.filePath}": expected top-level array, received ${typeof parsed}`,
+        this.filePath,
+        null,
+        'root'
+      );
+    }
+
+    for (let i = 0; i < parsed.length; i++) {
+      validateEventRecord(parsed[i], i, this.filePath);
+    }
+
+    this.events = parsed;
     return this.events;
   }
 
