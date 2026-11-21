@@ -78,7 +78,8 @@ export class SorobanClient {
 
 function normalizeNative(value) {
   if (typeof value === "bigint") {
-    return Number(value);
+    const number = Number(value);
+    return Number.isSafeInteger(number) ? number : value.toString();
   }
   if (Array.isArray(value)) {
     if (value.length === 1 && typeof value[0] === "string") {
