@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
-    "test": "node --test src/",
+    "test": "node --test src/*.test.js src/watchers/*.test.js",
     "lint": "eslint src/",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
