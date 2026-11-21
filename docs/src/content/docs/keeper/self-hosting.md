@@ -47,6 +47,7 @@ CMD ["node", "src/index.js"]
 | `DCA_CONTRACT_ID` | — | Deployed DCAPolicy contract ID |
 | `STELLAR_RPC_URL` | `https://soroban-testnet.stellar.org` | Soroban RPC endpoint |
 | `POLL_INTERVAL_MS` | `30000` | How often to poll contracts |
+| `MAX_LEDGER_STALL_MS` | `120000` | Suspend writes when the observed RPC ledger does not advance for this long |
 | `PORT` | `3002` | HTTP server port |
 | `LOG_LEVEL` | `info` | Pino log level |
 | `RETRY_MAX_ATTEMPTS` | `5` | Max retries for failed invocations |
@@ -56,7 +57,9 @@ CMD ["node", "src/index.js"]
 
 ### `GET /healthz`
 
-Returns `{ "status": "ok" }` when the keeper is running.
+Returns `status`, the observed `ledger`, and a `ledgerStall` state. The endpoint
+returns `503` while the observed ledger has not advanced within
+`MAX_LEDGER_STALL_MS`; polling continues so writes resume after progress.
 
 ---
 

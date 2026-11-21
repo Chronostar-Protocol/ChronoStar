@@ -8,6 +8,7 @@ export const config = {
   rpcUrl: process.env.STELLAR_RPC_URL || 'https://soroban-testnet.stellar.org',
   networkPassphrase: process.env.STELLAR_NETWORK_PASSPHRASE || 'Test SDF Network ; September 2015',
   pollIntervalMs: parseInt(process.env.POLL_INTERVAL_MS || '30000', 10),
+  maxLedgerStallMs: parseInt(process.env.MAX_LEDGER_STALL_MS || '120000', 10),
   port: parseInt(process.env.PORT || '3002', 10),
   logLevel: process.env.LOG_LEVEL || 'info',
   retryMaxAttempts: parseInt(process.env.RETRY_MAX_ATTEMPTS || '5', 10),
@@ -35,6 +36,9 @@ export function validateConfig(cfg = config) {
   }
   if (!Number.isFinite(cfg.pollIntervalMs) || cfg.pollIntervalMs <= 0) {
     errors.push('POLL_INTERVAL_MS must be a positive number');
+  }
+  if (!Number.isFinite(cfg.maxLedgerStallMs) || cfg.maxLedgerStallMs <= 0) {
+    errors.push('MAX_LEDGER_STALL_MS must be a positive number');
   }
   if (!Number.isFinite(cfg.port) || cfg.port <= 0 || cfg.port > 65535) {
     errors.push('PORT must be a valid port number (1-65535)');

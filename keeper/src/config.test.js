@@ -7,6 +7,7 @@ describe('config', () => {
     assert.equal(config.rpcUrl, 'https://soroban-testnet.stellar.org');
     assert.equal(config.networkPassphrase, 'Test SDF Network ; September 2015');
     assert.equal(config.pollIntervalMs, 30000);
+    assert.equal(config.maxLedgerStallMs, 120000);
     assert.equal(config.port, 3002);
     assert.equal(config.logLevel, 'info');
     assert.equal(config.retryMaxAttempts, 5);
@@ -24,6 +25,7 @@ describe('validateConfig', () => {
           vaultContractId: 'C123',
           rpcUrl: 'https://soroban-testnet.stellar.org',
           pollIntervalMs: 30000,
+          maxLedgerStallMs: 120000,
           port: 3002,
           retryMaxAttempts: 5,
           retryBaseDelayMs: 1000,
@@ -42,10 +44,28 @@ describe('validateConfig', () => {
         dcaContractId: '',
         rpcUrl: 'https://soroban-testnet.stellar.org',
         pollIntervalMs: 30000,
+        maxLedgerStallMs: 120000,
         port: 3002,
         retryMaxAttempts: 5,
         retryBaseDelayMs: 1000,
       })
+    );
+  });
+
+  it('requires a positive maximum ledger stall duration', async () => {
+    const { validateConfig } = await import('./config.js');
+    assert.throws(
+      () => validateConfig({
+        keeperSecret: 'S...',
+        vaultContractId: 'C123',
+        rpcUrl: 'https://soroban-testnet.stellar.org',
+        pollIntervalMs: 30000,
+        maxLedgerStallMs: 0,
+        port: 3002,
+        retryMaxAttempts: 5,
+        retryBaseDelayMs: 1000,
+      }),
+      /MAX_LEDGER_STALL_MS must be a positive number/
     );
   });
 });
