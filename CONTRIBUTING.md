@@ -7,7 +7,7 @@ Thanks for your interest in contributing! ChronoStar is a Stellar Soroban protoc
 ## Prerequisites
 
 - **Node.js** 22+
-- **Rust** 1.79+ with the `wasm32-unknown-unknown` target
+- **Rust** 1.80.0+ (MSRV) with the `wasm32-unknown-unknown` target
   ```bash
   rustup target add wasm32-unknown-unknown
   ```

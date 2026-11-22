@@ -57,7 +57,7 @@ Time-based payment primitives for the Stellar ecosystem: time-locked vaults, rec
 ### Prerequisites
 
 - Node.js 22+
-- Rust 1.79+ with `wasm32-unknown-unknown` target
+- Rust 1.80.0+ (MSRV) with `wasm32-unknown-unknown` target
 - Soroban CLI (`stellar` or `soroban`)
 
 ### Local Development

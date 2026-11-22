@@ -6,8 +6,8 @@ description: Deploy contracts, run the keeper, and open the dashboard.
 ## Prerequisites
 
 - Node.js v22+
-- Rust 1.79+ with `wasm32-unknown-unknown` target
-- Stellar Testnet account with some tokens
+- Rust 1.80.0+ (MSRV) with `wasm32-unknown-unknown` target
+- Stellar Testnet account with some tokens (see [Trustlines & Funding Prerequisites](./trustlines-and-funding/))
 - Freighter wallet (browser extension)
 
 ## 1. Deploy Contracts
@@ -71,4 +71,6 @@ npm run dev
 
 Visit `http://localhost:3000` and connect your Freighter wallet.
 
+## Recipient Readiness
 
+Before scheduling disbursements, verify that the recipient account holds the necessary base reserve and token trustlines. Follow the [Trustlines & Recipient Readiness Guide](./trustlines-and-funding/) for step-by-step verification commands.
