@@ -93,7 +93,7 @@ CI (`.github/workflows/deploy-frontend.yml`) runs `lint` + `build` on every push
 ### Vercel deploy fails with "Module not found" or build errors
 
 - Ensure the **Root Directory** is `frontend` — Vercel defaults to the repo root.
-- Run `npm run lint` and `npm run build` locally; fix errors before pushing (note: some dashboard/detail pages have duplicate code blocks that break the build — check `src/app/dashboard/page.tsx` and `src/app/{vault,stream,dca}/[id]/page.tsx`).
+- Run `npm run lint` and `npm run build` locally; fix errors before pushing.
 - Clear Vercel's build cache: **Settings → Build Cache** then redeploy, or `vercel build --force`.
 
 ### CORS errors in the browser console
@@ -123,3 +123,7 @@ CI (`.github/workflows/deploy-frontend.yml`) runs `lint` + `build` on every push
 
 - Verify the URL via `curl https://<backend-url>/api/stats` — it must return JSON, not an error page.
 - Env vars changed in Vercel require a redeploy to take effect.
+
+## 6. Testnet Reset Recovery
+
+When the SDF periodically resets the Stellar Testnet, contract addresses configured in Vercel environment variables will no longer exist. Refer to the [Testnet Reset Recovery Runbook](../docs/src/content/docs/operations/testnet-reset-recovery.md) for instructions on updating Vercel environment variables and redeploying the frontend.

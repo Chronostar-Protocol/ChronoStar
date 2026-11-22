@@ -5,8 +5,8 @@ description: Deploy contracts, run the keeper, and open the dashboard.
 
 ## Prerequisites
 
-- Node.js v22+
-- Rust 1.79+ with `wasm32-unknown-unknown` target
+- Node.js >=22.0.0 (see `.nvmrc`)
+- Rust 1.84.0 with `wasm32-unknown-unknown` target
 - Stellar Testnet account with some tokens
 - Freighter wallet (browser extension)
 
@@ -21,7 +21,7 @@ cargo install --locked stellar-cli
 
 # Deploy each contract
 stellar contract deploy \
-  --wasm target/wasm32-unknown-unknown/release/schedule_vault.wasm \
+  --wasm schedule-vault/target/wasm32-unknown-unknown/release/schedule_vault.wasm \
   --source <SECRET> \
   --rpc-url https://soroban-testnet.stellar.org \
   --network-passphrase "Test SDF Network ; September 2015"
@@ -71,4 +71,6 @@ npm run dev
 
 Visit `http://localhost:3000` and connect your Freighter wallet.
 
+## Periodic Testnet Resets
 
+The Stellar Development Foundation (SDF) periodically resets the Stellar Testnet, which removes all deployed contracts and ledger state. If you encounter contract missing errors or a freshly reset ledger sequence, follow the [Testnet Reset Recovery Runbook](../../operations/testnet-reset-recovery.md) to rebuild and re-synchronize your deployment.
