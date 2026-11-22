@@ -1,13 +1,14 @@
-'use client';
+"use client";
 
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { useParams } from 'next/navigation';
-import Link from 'next/link';
-import { api, getApiErrorMessage } from '@/lib/api';
-import { useWallet } from '@/lib/store';
-import { TxToast } from '@/components/TxToast';
-import { DetailPageSkeleton } from '@/components/Skeleton';
-import type { VaultEntry } from '@/types';
+import { useState, useEffect, useCallback, useRef } from "react";
+import { useParams } from "next/navigation";
+import Link from "next/link";
+import { api, getApiErrorMessage } from "@/lib/api";
+import { useWallet } from "@/lib/store";
+import { TxToast } from "@/components/TxToast";
+import { DetailPageSkeleton } from "@/components/Skeleton";
+import { ShareScheduleButton } from "@/components/ShareScheduleDialog";
+import type { VaultEntry } from "@/types";
 
 export default function VaultDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -16,24 +17,36 @@ export default function VaultDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const activeRequest = useRef<AbortController | null>(null);
-  const [txStatus, setTxStatus] = useState<null | 'pending' | 'success' | 'error'>(null);
+  const [txStatus, setTxStatus] = useState<null | "pending" | "success" | "error">(null);
 
   const fetchVault = useCallback(() => {
     activeRequest.current?.abort();
     const controller = new AbortController();
     activeRequest.current = controller;
-    if (!address) { setLoading(false); setVault(null); return; }
+    if (!address) {
+      setLoading(false);
+      setVault(null);
+      return;
+    }
     setLoading(true);
     setError(null);
-    api.getSchedules(address, { signal: controller.signal })
-      .then(vaults => {
+    api
+      .getSchedules(address, { signal: controller.signal })
+      .then((vaults) => {
         if (controller.signal.aborted) return;
-        const found = vaults.find(v => v.id === Number(id));
+        const found = vaults.find((v) => v.id === Number(id));
         if (found) setVault(found);
-        else { setVault(null); setError('Vault not found. It may have been removed.'); }
+        else {
+          setVault(null);
+          setError("Vault not found. It may have been removed.");
+        }
       })
-      .catch((err) => { if (!controller.signal.aborted) setError(getApiErrorMessage(err)); })
-      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+      .catch((err) => {
+        if (!controller.signal.aborted) setError(getApiErrorMessage(err));
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
   }, [address, id]);
 
   useEffect(() => {
@@ -48,8 +61,12 @@ export default function VaultDetailPage() {
   if (error) {
     return (
       <div className="text-center py-20">
-        <div className="text-4xl mb-3" aria-hidden="true">&#9888;</div>
-        <h2 className="text-lg font-heading font-bold text-text-primary mb-2">Something went wrong</h2>
+        <div className="text-4xl mb-3" aria-hidden="true">
+          &#9888;
+        </div>
+        <h2 className="text-lg font-heading font-bold text-text-primary mb-2">
+          Something went wrong
+        </h2>
         <p className="text-text-muted text-sm mb-6">{error}</p>
         <div className="flex gap-3 justify-center">
           <button
@@ -73,7 +90,10 @@ export default function VaultDetailPage() {
     return (
       <div className="text-center py-20">
         <p className="text-text-muted">Vault not found.</p>
-        <Link href="/dashboard" className="text-sm text-accent-blue hover:underline mt-2 inline-block">
+        <Link
+          href="/dashboard"
+          className="text-sm text-accent-blue hover:underline mt-2 inline-block"
+        >
           &larr; Back to Dashboard
         </Link>
       </div>
@@ -82,8 +102,13 @@ export default function VaultDetailPage() {
 
   return (
     <div className="max-w-lg mx-auto">
-      <Link href="/dashboard" className="text-sm text-accent-blue hover:underline">&larr; Dashboard</Link>
-      <h1 className="text-2xl font-heading font-bold text-text-primary mt-4 mb-6">Vault #{vault.id}</h1>
+      <Link href="/dashboard" className="text-sm text-accent-blue hover:underline">
+        &larr; Dashboard
+      </Link>
+      <div className="flex items-center justify-between mt-4 mb-6">
+        <h1 className="text-2xl font-heading font-bold text-text-primary">Vault #{vault.id}</h1>
+        <ShareScheduleButton scheduleType="vault" scheduleId={vault.id} label={vault.label} />
+      </div>
 
       <div className="space-y-3 p-4 rounded-lg border border-border bg-bg-card">
         <DetailRow label="Label" value={vault.label} />
@@ -93,9 +118,9 @@ export default function VaultDetailPage() {
         <DetailRow label="Status" value={vault.status} />
       </div>
 
-      {vault.status === 'Active' && (
+      {vault.status === "Active" && (
         <button
-          onClick={() => setTxStatus('pending')}
+          onClick={() => setTxStatus("pending")}
           className="mt-6 w-full py-3 rounded-lg bg-accent-red text-white font-medium hover:opacity-90"
         >
           Cancel Vault
