@@ -5,6 +5,9 @@ on:
     branches: [master]
     paths:
       - 'docs/**'
+  pull_request:
+    paths:
+      - 'docs/**'
   workflow_dispatch:
 
 permissions:
@@ -30,12 +33,27 @@ jobs:
         working-directory: docs
       - run: npm run build
         working-directory: docs
+      - name: Run automated accessibility audit (#441)
+        run: npm run test:a11y
+        working-directory: docs
+      - name: Upload accessibility audit report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: docs-a11y-report
+          path: |
+            docs/docs-a11y-report.md
+            docs/docs-a11y-report.json
       - uses: actions/configure-pages@v5
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
       - uses: actions/upload-pages-artifact@v4
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
         with:
           path: docs/dist
+
   deploy:
     needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     environment:
       name: github-pages

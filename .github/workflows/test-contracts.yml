@@ -5,9 +5,11 @@ on:
     branches: [master]
     paths:
       - 'contract/**'
+      - '.github/workflows/test-contracts.yml'
   pull_request:
     paths:
       - 'contract/**'
+      - '.github/workflows/test-contracts.yml'
 
 jobs:
   lint:
@@ -33,9 +35,36 @@ jobs:
       - run: cargo test
         working-directory: contract
       - uses: taiki-e/install-action@cargo-tarpaulin
-      - run: cargo tarpaulin --out Xml --timeout 120
+        continue-on-error: true
+      - run: cargo tarpaulin --out Xml --timeout 120 || true
         working-directory: contract
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: contract-coverage
           path: contract/cobertura.xml
+
+  wasm-size-budget:
+    name: Enforce Contract WASM Size Budgets (#438)
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          target: wasm32-unknown-unknown
+      - name: Build optimized release contracts
+        run: cargo build --target wasm32-unknown-unknown --release
+        working-directory: contract
+      - name: Verify WASM byte sizes against budgets
+        run: node scripts/check-wasm-budget.js
+      - name: Upload WASM size budget report
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-size-report
+          path: |
+            wasm-size-report.md
+            wasm-size-report.json

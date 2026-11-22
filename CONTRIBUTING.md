@@ -2,7 +2,7 @@
 
 Thanks for your interest in contributing! ChronoStar is a Stellar Soroban protocol for scheduled and recurring payments.
 
-> 🎓 **New Contributor?** Check out our step-by-step [Good-First-Issue Onboarding Curriculum](file:///C:/Users/JUST%20J/repos/ChronoStar/docs/src/content/docs/getting-started/onboarding-curriculum.md) for setup checklists, curated starter tasks, and walkthroughs.
+> 🎓 **New Contributor?** Check out our step-by-step [Good-First-Issue Onboarding Curriculum](docs/src/content/docs/getting-started/onboarding-curriculum.md) for setup checklists, curated starter tasks, and walkthroughs.
 
 ## Prerequisites
 
@@ -60,7 +60,7 @@ npm start
 - **Frontend fails to connect wallet** — make sure Freighter browser extension is installed and set to Testnet.
 - **Keeper fails with "simulation error"** — verify contract addresses in `.env` match the current Testnet deployment.
 
-## Running Tests
+## Running Tests & CI Checks
 
 ```bash
 # Contracts (all three in workspace)
@@ -69,19 +69,22 @@ cd contract && cargo test
 # Backend
 cd backend && npm test
 
-# Backend integration (requires Docker + Stellar CLI; spins up a local
-# Soroban sandbox, seeds the three contracts, and runs supertest against
-# the real routes)
+# Backend integration
 cd backend && npm run test:integration
-
-# Tests are deterministic but each run completes a fresh seed; the sandbox
-# container is stopped afterwards unless KEEP_SANDBOX=1 is set.
 
 # Keeper
 cd keeper && npm test
 
-# Frontend (Next.js build checks types + lint)
-cd frontend && npm run build && npm run lint
+# Documentation Accessibility
+cd docs && npm run test:a11y
+
+# GitHub Actions Workflow Validation (#439)
+npm run lint:workflows
+# Or with actionlint:
+actionlint -color
+
+# WASM Bytecode Size Budgets (#438)
+npm run check:wasm-budget
 ```
 
 ## Branch & Commit Conventions
