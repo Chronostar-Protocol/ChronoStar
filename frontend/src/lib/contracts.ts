@@ -10,6 +10,7 @@ import {
 } from "@stellar/stellar-sdk";
 import { signTransaction } from "@stellar/freighter-api";
 import { config, getNetworkPassphrase } from "./config";
+import type { TransactionReceipt } from "../types";
 
 export interface VaultParams {
   recipient: string;
@@ -336,4 +337,82 @@ export async function createDcaTx(
   ];
 
   return buildAndSignContractTx(senderAddress, contractId, "create_dca", args, options);
+}
+
+export interface GenerateReceiptInput {
+  network?: string;
+  contractId: string;
+  method: string;
+  hash: string;
+  ledger?: number | bigint | string;
+  status: "SUCCESS" | "PENDING" | "ERROR" | string;
+  parameters: Record<string, unknown>;
+}
+
+/**
+ * Generates an unambiguous, downloadable JSON receipt for confirmed transactions.
+ * Strict criteria from #416:
+ * - Only confirmed successful transactions (status === "SUCCESS") can generate a receipt.
+ * - Hash must be a valid 64-character hex string.
+ * - Raw integer amounts remain strings (BigInt or number strings are preserved as strings).
+ */
+export function generateTransactionReceipt(input: GenerateReceiptInput): TransactionReceipt {
+  if (input.status !== "SUCCESS") {
+    throw new Error(`Cannot generate receipt for unconfirmed transaction (status: ${input.status})`);
+  }
+  if (!input.hash || !/^[\da-f]{64}$/i.test(input.hash)) {
+    throw new Error("Cannot generate receipt: missing or invalid transaction hash");
+  }
+  if (!input.contractId || typeof input.contractId !== "string" || !input.contractId.trim()) {
+    throw new Error("Cannot generate receipt: contractId is required and cannot be empty");
+  }
+  if (!input.method || typeof input.method !== "string" || !input.method.trim()) {
+    throw new Error("Cannot generate receipt: method is required and cannot be empty");
+  }
+
+  // Preserve raw integer amounts as strings and sanitize parameters
+  const serializedParams: Record<string, string | number | boolean | null | undefined> = {};
+  for (const [key, val] of Object.entries(input.parameters || {})) {
+    if (typeof val === "bigint") {
+      serializedParams[key] = val.toString();
+    } else if (
+      typeof val === "string" ||
+      typeof val === "number" ||
+      typeof val === "boolean" ||
+      val === null ||
+      val === undefined
+    ) {
+      serializedParams[key] = val;
+    } else {
+      serializedParams[key] = JSON.stringify(val);
+    }
+  }
+
+  return {
+    network: input.network || (config.environment ? config.environment.toUpperCase() : "TESTNET"),
+    contractId: input.contractId.trim(),
+    method: input.method.trim(),
+    hash: input.hash.toLowerCase(),
+    ledger: input.ledger,
+    timestamp: new Date().toISOString(),
+    status: "SUCCESS",
+    parameters: serializedParams,
+  };
+}
+
+/**
+ * Triggers a client-side download of a confirmed transaction receipt as a formatted JSON file.
+ */
+export function downloadReceiptAsJson(receipt: TransactionReceipt): void {
+  if (typeof window === "undefined" || !document?.createElement) return;
+  const jsonContent = JSON.stringify(receipt, null, 2);
+  const blob = new Blob([jsonContent], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `chronostar-receipt-${receipt.method}-${receipt.hash.slice(0, 8)}.json`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+  URL.revokeObjectURL(url);
 }

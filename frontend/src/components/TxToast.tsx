@@ -2,15 +2,18 @@
 
 import React, { useState, useEffect } from "react";
 import { getTransactionExplorerUrl } from "@/lib/config";
+import { downloadReceiptAsJson } from "@/lib/contracts";
+import type { TransactionReceipt } from "@/types";
 
 interface TxToastProps {
   hash?: string | null;
   status?: "pending" | "success" | "error" | null;
   message?: string;
+  receipt?: TransactionReceipt | null;
   onClose?: () => void;
 }
 
-export function TxToast({ hash, status, message, onClose }: TxToastProps) {
+export function TxToast({ hash, status, message, receipt, onClose }: TxToastProps) {
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
@@ -43,16 +46,28 @@ export function TxToast({ hash, status, message, onClose }: TxToastProps) {
         )}
         <span className="text-sm">{message || status}</span>
       </div>
-      {hash && (
-        <a
-          href={getTransactionExplorerUrl(hash)}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="block mt-1 text-xs text-accent-blue underline"
-        >
-          View on explorer
-        </a>
-      )}
+      <div className="flex items-center gap-3 mt-1 text-xs">
+        {hash && (
+          <a
+            href={getTransactionExplorerUrl(hash)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-accent-blue underline hover:opacity-80"
+          >
+            View on explorer
+          </a>
+        )}
+        {status === "success" && receipt && (
+          <button
+            type="button"
+            onClick={() => downloadReceiptAsJson(receipt)}
+            className="text-accent-green underline hover:opacity-80 flex items-center gap-1 font-medium"
+            data-testid="download-receipt-btn"
+          >
+            Download receipt
+          </button>
+        )}
+      </div>
     </div>
   );
 }
