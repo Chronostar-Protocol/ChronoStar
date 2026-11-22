@@ -12,6 +12,9 @@ describe('config', () => {
     assert.equal(config.logLevel, 'info');
     assert.equal(config.retryMaxAttempts, 5);
     assert.equal(config.retryBaseDelayMs, 1000);
+    assert.equal(config.maxFeeStroops, 1000000);
+    assert.equal(config.dailyFeeBudgetStroops, 50000000);
+    assert.equal(config.journalMaxEntries, 500);
   });
 });
 
@@ -29,6 +32,9 @@ describe('validateConfig', () => {
           port: 3002,
           retryMaxAttempts: 5,
           retryBaseDelayMs: 1000,
+          maxFeeStroops: 1000000,
+          dailyFeeBudgetStroops: 50000000,
+          journalMaxEntries: 500,
         }),
       /KEEPER_SECRET is required/
     );
@@ -48,6 +54,9 @@ describe('validateConfig', () => {
         port: 3002,
         retryMaxAttempts: 5,
         retryBaseDelayMs: 1000,
+        maxFeeStroops: 1000000,
+        dailyFeeBudgetStroops: 50000000,
+        journalMaxEntries: 500,
       })
     );
   });
@@ -64,8 +73,41 @@ describe('validateConfig', () => {
         port: 3002,
         retryMaxAttempts: 5,
         retryBaseDelayMs: 1000,
+        maxFeeStroops: 1000000,
+        dailyFeeBudgetStroops: 50000000,
+        journalMaxEntries: 500,
       }),
       /MAX_LEDGER_STALL_MS must be a positive number/
+    );
+  });
+
+  it('validates fee budget and journal configuration bounds (#436, #435)', async () => {
+    const { validateConfig } = await import('./config.js');
+    const valid = {
+      keeperSecret: 'S...',
+      vaultContractId: 'C123',
+      rpcUrl: 'https://soroban-testnet.stellar.org',
+      pollIntervalMs: 30000,
+      maxLedgerStallMs: 120000,
+      port: 3002,
+      retryMaxAttempts: 5,
+      retryBaseDelayMs: 1000,
+      maxFeeStroops: 1000000,
+      dailyFeeBudgetStroops: 50000000,
+      journalMaxEntries: 500,
+    };
+
+    assert.throws(
+      () => validateConfig({ ...valid, maxFeeStroops: -1 }),
+      /MAX_FEE_STROOPS must be a non-negative number/
+    );
+    assert.throws(
+      () => validateConfig({ ...valid, dailyFeeBudgetStroops: -5 }),
+      /DAILY_FEE_BUDGET_STROOPS must be a non-negative number/
+    );
+    assert.throws(
+      () => validateConfig({ ...valid, journalMaxEntries: 0 }),
+      /JOURNAL_MAX_ENTRIES must be a positive number/
     );
   });
 });

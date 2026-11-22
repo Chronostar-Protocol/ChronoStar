@@ -14,3 +14,9 @@ test_snapshots/
 frontend/playwright-report/
 frontend/test-results/
 frontend/blob-report/
+
+# Keeper runtime state & journal
+.keeper-*.json
+keeper/.keeper-*.json
+.test-*.json
+keeper/.test-*.json

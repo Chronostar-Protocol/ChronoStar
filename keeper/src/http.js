@@ -9,12 +9,19 @@ export function createServer(watchers, client, port = config.port) {
     if (req.url === '/healthz') {
       const stale = Object.values(watchers).filter((w) => w.lastPoll && Date.now() - w.lastPoll > 5 * 60_000);
       const ledgerStall = client?.ledgerStatus() ?? null;
-      const degraded = stale.length > 0 || ledgerStall?.stalled === true || ledgerStall?.status === 'transport_error';
+      const feeBudget = client?.feeBudgetStatus?.() ?? null;
+      const degraded =
+        stale.length > 0 ||
+        ledgerStall?.stalled === true ||
+        ledgerStall?.status === 'transport_error' ||
+        feeBudget?.exhausted === true;
+
       res.writeHead(degraded ? 503 : 200);
       res.end(JSON.stringify({
         status: degraded ? 'degraded' : 'ok',
         ledger: ledgerStall?.observedLedger ?? watchers.__ledger ?? null,
         ledgerStall,
+        feeBudget,
         staleWatchers: stale.length,
       }));
       return;
@@ -29,6 +36,7 @@ export function createServer(watchers, client, port = config.port) {
           ]),
         ),
         ledgerStall: client?.ledgerStatus() ?? null,
+        feeBudget: client?.feeBudgetStatus?.() ?? null,
         uptime: process.uptime(),
         memory: process.memoryUsage().rss,
       };

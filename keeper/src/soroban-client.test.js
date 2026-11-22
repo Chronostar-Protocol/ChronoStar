@@ -1,7 +1,13 @@
 import { describe, it, mock } from "node:test";
 import assert from "node:assert";
 import { Account, Keypair, xdr } from "@stellar/stellar-sdk";
-import { LedgerStalledError, SorobanClient } from "./soroban-client.js";
+import {
+  LedgerStalledError,
+  NetworkIdentityMismatchError,
+  PerTxFeeLimitExceededError,
+  DailyFeeBudgetExhaustedError,
+  SorobanClient,
+} from "./soroban-client.js";
 import { config } from "./config.js";
 
 const TEST_CONTRACT = "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4";
@@ -30,6 +36,7 @@ describe("SorobanClient", () => {
 
     client._assemble = mock.fn(() => ({
       sign: () => {},
+      fee: "100",
     }));
 
     const result = await client.invokeContract(
@@ -60,7 +67,7 @@ describe("SorobanClient", () => {
       })),
       sendTransaction: mock.fn(async () => ({ status: "SUCCESS", hash: "txhash" })),
     };
-    client._assemble = mock.fn(() => ({ sign: () => {} }));
+    client._assemble = mock.fn(() => ({ sign: () => {}, fee: "100" }));
 
     try {
       assert.equal(client.ledgerStatus().status, "unknown");
@@ -98,6 +105,7 @@ describe("SorobanClient", () => {
         return { latestLedger: 100, result: { retval: xdr.ScVal.scvVoid() }, transactionData: {} };
       }),
     };
+
     try {
       await assert.rejects(client.readContract(TEST_CONTRACT, "current_ledger", []), /RPC unavailable/);
       assert.equal(client.ledgerStatus().status, "transport_error");
@@ -151,6 +159,81 @@ describe("SorobanClient", () => {
       config.retryMaxAttempts = originalAttempts;
       config.retryBaseDelayMs = originalDelay;
     }
+  });
+});
+
+describe("SorobanClient network identity (#434)", () => {
+  it("verifies successfully when RPC passphrase matches configured passphrase", async () => {
+    const client = new SorobanClient();
+    client.server = {
+      getNetwork: mock.fn(async () => ({
+        passphrase: config.networkPassphrase,
+        protocolVersion: 21,
+      })),
+    };
+
+    const net = await client.verifyNetworkIdentity();
+    assert.strictEqual(net.passphrase, config.networkPassphrase);
+    assert.strictEqual(client.networkVerified, true);
+  });
+
+  it("throws NetworkIdentityMismatchError when RPC passphrase differs", async () => {
+    const client = new SorobanClient();
+    client.server = {
+      getNetwork: mock.fn(async () => ({
+        passphrase: "Wrong Passphrase ; 2024",
+        protocolVersion: 21,
+      })),
+    };
+
+    await assert.rejects(
+      () => client.verifyNetworkIdentity(),
+      NetworkIdentityMismatchError
+    );
+    assert.strictEqual(client.networkVerified, false);
+  });
+});
+
+describe("SorobanClient fee budget and journal enforcement (#435, #436)", () => {
+  it("enforces fee budget cap and refuses submission before signing", async () => {
+    const client = new SorobanClient();
+    client.sourceAccount = new Account(TEST_ACCOUNT, "1");
+    client.sourceKeypair = {
+      publicKey: () => TEST_ACCOUNT,
+      sign: mock.fn(),
+    };
+
+    client.server = {
+      simulateTransaction: mock.fn(async () => ({
+        result: { retval: null },
+        transactionData: {},
+      })),
+      sendTransaction: mock.fn(),
+    };
+
+    // Assembled tx with fee 2_000_000 stroops
+    client._assemble = mock.fn(() => ({
+      fee: "2000000",
+      sign: mock.fn(),
+    }));
+
+    // Mock fee budget controller to throw per-tx fee error
+    client.feeBudget = {
+      checkAndReserve: mock.fn(() => {
+        throw new PerTxFeeLimitExceededError(2_000_000, 1_000_000);
+      }),
+      release: mock.fn(),
+      confirm: mock.fn(),
+      status: mock.fn(() => ({})),
+    };
+
+    await assert.rejects(
+      () => client.invokeContract(TEST_CONTRACT, "huge_tx", []),
+      PerTxFeeLimitExceededError
+    );
+
+    // Ensure it never signed or sent
+    assert.strictEqual(client.server.sendTransaction.mock.callCount(), 0);
   });
 });
 
