@@ -137,3 +137,14 @@ export interface Stats {
   dca: { total: number; active: number; exhausted: number };
   totalValueLocked: string;
 }
+
+export interface TransactionReceipt {
+  network: string;
+  contractId: string;
+  method: string;
+  hash: string;
+  ledger?: number | bigint | string;
+  timestamp: string;
+  status: "SUCCESS";
+  parameters: Record<string, string | number | boolean | null | undefined>;
+}
