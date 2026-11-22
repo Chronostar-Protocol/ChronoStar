@@ -20,21 +20,49 @@ export class ContractSimulationError extends Error {
   }
 }
 
+export function serializeArgs(args) {
+  if (!args) return "[]";
+  return JSON.stringify(args, (_key, value) => {
+    if (typeof value === "bigint") {
+      return `${value.toString()}n`;
+    }
+    if (value && typeof value.toXDR === "function") {
+      return `xdr:${value.toXDR("base64")}`;
+    }
+    if (value && typeof value === "object" && !Array.isArray(value) && !(value instanceof RegExp)) {
+      const sorted = {};
+      for (const k of Object.keys(value).sort()) {
+        sorted[k] = value[k];
+      }
+      return sorted;
+    }
+    return value;
+  });
+}
+
 export class SorobanClient {
-  constructor() {
-    const isInsecureHttp = config.rpcUrl.startsWith("http://");
-    this.server = new rpc.Server(config.rpcUrl, { allowHttp: isInsecureHttp });
-    this.networkPassphrase = config.networkPassphrase;
+  constructor(options = {}) {
+    const rpcUrl = options.rpcUrl ?? config.rpcUrl;
+    const isInsecureHttp = rpcUrl?.startsWith("http://");
+    this.server = options.server ?? new rpc.Server(rpcUrl, { allowHttp: isInsecureHttp });
+    this.networkPassphrase = options.networkPassphrase ?? config.networkPassphrase;
+    this.inFlight = options.inFlight ?? new Map();
   }
 
-  async simulate(contractId, method, args) {
+  _getInFlightKey(contractId, method, args, options) {
+    const network = options?.networkPassphrase ?? this.networkPassphrase ?? "";
+    return `${network}:${contractId}:${method}:${serializeArgs(args)}`;
+  }
+
+  async simulate(contractId, method, args = [], options = {}) {
     const contract = new Contract(contractId);
     const op = contract.call(method, ...args);
     const source = Keypair.random();
     const acc = new Account(source.publicKey(), "0");
+    const networkPassphrase = options?.networkPassphrase ?? this.networkPassphrase;
     const tx = new TransactionBuilder(acc, {
       fee: null,
-      networkPassphrase: this.networkPassphrase,
+      networkPassphrase,
     })
       .addOperation(op)
       .setTimeout(0)
@@ -43,17 +71,61 @@ export class SorobanClient {
     return simulation;
   }
 
-  async readContract(contractId, method, args) {
-    const sim = await this.simulate(contractId, method, args);
-    if (rpc.Api.isSimulationError(sim) || sim?.error) {
-      const diagnostic =
-        typeof sim?.error === "string"
-          ? sim.error
-          : sim?.error?.message || sim?.error?.toString?.() || "unknown RPC error";
-      throw new ContractSimulationError(diagnostic);
+  readContract(contractId, method, args = [], options = {}) {
+    const key = this._getInFlightKey(contractId, method, args, options);
+
+    let entry = this.inFlight.get(key);
+
+    if (!entry) {
+      const promise = (async () => {
+        try {
+          const sim = await this.simulate(contractId, method, args, options);
+          if (rpc.Api.isSimulationError(sim) || sim?.error) {
+            const diagnostic =
+              typeof sim?.error === "string"
+                ? sim.error
+                : sim?.error?.message || sim?.error?.toString?.() || "unknown RPC error";
+            throw new ContractSimulationError(diagnostic);
+          }
+          if (!sim?.result?.retval) return null;
+          return normalizeNative(scValToNative(sim.result.retval));
+        } finally {
+          this.inFlight.delete(key);
+        }
+      })();
+
+      // Prevent unhandled rejections if all consumers cancel or detach early
+      promise.catch(() => {});
+
+      this.inFlight.set(key, promise);
+      entry = promise;
     }
-    if (!sim?.result?.retval) return null;
-    return normalizeNative(scValToNative(sim.result.retval));
+
+    if (options?.signal) {
+      const { signal } = options;
+      if (signal.aborted) {
+        return Promise.reject(signal.reason ?? new Error("This operation was aborted"));
+      }
+      return new Promise((resolve, reject) => {
+        const onAbort = () => {
+          signal.removeEventListener("abort", onAbort);
+          reject(signal.reason ?? new Error("This operation was aborted"));
+        };
+        signal.addEventListener("abort", onAbort, { once: true });
+        entry.then(
+          (val) => {
+            signal.removeEventListener("abort", onAbort);
+            resolve(val);
+          },
+          (err) => {
+            signal.removeEventListener("abort", onAbort);
+            reject(err);
+          },
+        );
+      });
+    }
+
+    return entry;
   }
 
   scvU64(val) {
