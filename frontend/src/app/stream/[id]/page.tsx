@@ -1,13 +1,14 @@
-'use client';
+"use client";
 
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { useParams } from 'next/navigation';
-import Link from 'next/link';
-import { api, getApiErrorMessage } from '@/lib/api';
-import { useWallet } from '@/lib/store';
-import { TxToast } from '@/components/TxToast';
-import { DetailPageSkeleton } from '@/components/Skeleton';
-import type { StreamEntry } from '@/types';
+import { useState, useEffect, useCallback, useRef } from "react";
+import { useParams } from "next/navigation";
+import Link from "next/link";
+import { api, getApiErrorMessage } from "@/lib/api";
+import { useWallet } from "@/lib/store";
+import { TxToast } from "@/components/TxToast";
+import { DetailPageSkeleton } from "@/components/Skeleton";
+import { ShareScheduleButton } from "@/components/ShareScheduleDialog";
+import type { StreamEntry } from "@/types";
 
 export default function StreamDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -15,7 +16,7 @@ export default function StreamDetailPage() {
   const [stream, setStream] = useState<StreamEntry | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [txStatus, setTxStatus] = useState<null | 'pending' | 'success' | 'error'>(null);
+  const [txStatus, setTxStatus] = useState<null | "pending" | "success" | "error">(null);
 
   const activeRequest = useRef<AbortController | null>(null);
 
@@ -30,17 +31,18 @@ export default function StreamDetailPage() {
     }
     setLoading(true);
     setError(null);
-    api.getStreams(address, { signal: controller.signal })
-      .then(streams => {
+    api
+      .getStreams(address, { signal: controller.signal })
+      .then((streams) => {
         if (controller.signal.aborted) return;
-        const found = streams.find(item => item.id === Number(id));
+        const found = streams.find((item) => item.id === Number(id));
         if (found) setStream(found);
         else {
           setStream(null);
-          setError('Stream not found. It may have been removed.');
+          setError("Stream not found. It may have been removed.");
         }
       })
-      .catch(err => {
+      .catch((err) => {
         if (!controller.signal.aborted) setError(getApiErrorMessage(err));
       })
       .finally(() => {
@@ -60,8 +62,12 @@ export default function StreamDetailPage() {
   if (error) {
     return (
       <div className="text-center py-20">
-        <div className="text-4xl mb-3" aria-hidden="true">&#9888;</div>
-        <h2 className="text-lg font-heading font-bold text-text-primary mb-2">Something went wrong</h2>
+        <div className="text-4xl mb-3" aria-hidden="true">
+          &#9888;
+        </div>
+        <h2 className="text-lg font-heading font-bold text-text-primary mb-2">
+          Something went wrong
+        </h2>
         <p className="text-text-muted text-sm mb-6">{error}</p>
         <div className="flex gap-3 justify-center">
           <button
@@ -85,7 +91,10 @@ export default function StreamDetailPage() {
     return (
       <div className="text-center py-20">
         <p className="text-text-muted">Stream not found.</p>
-        <Link href="/dashboard" className="text-sm text-accent-blue hover:underline mt-2 inline-block">
+        <Link
+          href="/dashboard"
+          className="text-sm text-accent-blue hover:underline mt-2 inline-block"
+        >
           &larr; Back to Dashboard
         </Link>
       </div>
@@ -98,15 +107,20 @@ export default function StreamDetailPage() {
 
   return (
     <div className="max-w-lg mx-auto">
-      <Link href="/dashboard" className="text-sm text-accent-blue hover:underline">&larr; Dashboard</Link>
-      <h1 className="text-2xl font-heading font-bold text-text-primary mt-4 mb-6">Stream #{stream.id}</h1>
+      <Link href="/dashboard" className="text-sm text-accent-blue hover:underline">
+        &larr; Dashboard
+      </Link>
+      <div className="flex items-center justify-between mt-4 mb-6">
+        <h1 className="text-2xl font-heading font-bold text-text-primary">Stream #{stream.id}</h1>
+        <ShareScheduleButton scheduleType="stream" scheduleId={stream.id} label={stream.label} />
+      </div>
 
       <div className="space-y-3 p-4 rounded-lg border border-border bg-bg-card">
         <DetailRow label="Label" value={stream.label} />
         <DetailRow label="Recipient" value={stream.recipient} />
         <DetailRow label="Total Amount" value={stream.total_amount} />
         <DetailRow label="Claimed" value={stream.claimed_amount} />
-        {stream.status === 'Active' && stream.claimable_amount && (
+        {stream.status === "Active" && stream.claimable_amount && (
           <DetailRow label="Claimable Now" value={stream.claimable_amount} />
         )}
         <DetailRow label="Progress" value={`${progress.toFixed(1)}%`} />
@@ -114,9 +128,9 @@ export default function StreamDetailPage() {
         <DetailRow label="Status" value={stream.status} />
       </div>
 
-      {stream.status === 'Active' && (
+      {stream.status === "Active" && (
         <button
-          onClick={() => setTxStatus('pending')}
+          onClick={() => setTxStatus("pending")}
           className="mt-6 w-full py-3 rounded-lg bg-accent-green text-white font-medium hover:opacity-90"
         >
           Claim

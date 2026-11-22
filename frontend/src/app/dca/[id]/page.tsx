@@ -1,13 +1,14 @@
-'use client';
+"use client";
 
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { useParams } from 'next/navigation';
-import Link from 'next/link';
-import { api, getApiErrorMessage } from '@/lib/api';
-import { useWallet } from '@/lib/store';
-import { TxToast } from '@/components/TxToast';
-import { DetailPageSkeleton } from '@/components/Skeleton';
-import type { DCAEntry, DCAExecution } from '@/types';
+import { useState, useEffect, useCallback, useRef } from "react";
+import { useParams } from "next/navigation";
+import Link from "next/link";
+import { api, getApiErrorMessage } from "@/lib/api";
+import { useWallet } from "@/lib/store";
+import { TxToast } from "@/components/TxToast";
+import { DetailPageSkeleton } from "@/components/Skeleton";
+import { ShareScheduleButton } from "@/components/ShareScheduleDialog";
+import type { DCAEntry, DCAExecution } from "@/types";
 
 const HISTORY_PAGE_SIZE = 10;
 
@@ -17,7 +18,7 @@ export default function DCADetailPage() {
   const [dca, setDca] = useState<DCAEntry | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [txStatus, setTxStatus] = useState<null | 'pending' | 'success' | 'error'>(null);
+  const [txStatus, setTxStatus] = useState<null | "pending" | "success" | "error">(null);
   const [history, setHistory] = useState<DCAExecution[]>([]);
   const [historyPage, setHistoryPage] = useState(1);
   const [historyError, setHistoryError] = useState<string | null>(null);
@@ -35,17 +36,18 @@ export default function DCADetailPage() {
     }
     setLoading(true);
     setError(null);
-    api.getDCA(address, { signal: controller.signal })
-      .then(dcas => {
+    api
+      .getDCA(address, { signal: controller.signal })
+      .then((dcas) => {
         if (controller.signal.aborted) return;
-        const found = dcas.find(item => item.id === Number(id));
+        const found = dcas.find((item) => item.id === Number(id));
         if (found) setDca(found);
         else {
           setDca(null);
-          setError('DCA policy not found. It may have been removed.');
+          setError("DCA policy not found. It may have been removed.");
         }
       })
-      .catch(err => {
+      .catch((err) => {
         if (!controller.signal.aborted) setError(getApiErrorMessage(err));
       })
       .finally(() => {
@@ -64,11 +66,17 @@ export default function DCADetailPage() {
     setHistoryError(null);
 
     api
-      .getDCAHistory(address, Number(id), (historyPage - 1) * HISTORY_PAGE_SIZE + 1, HISTORY_PAGE_SIZE, { signal: controller.signal })
-      .then(res => {
+      .getDCAHistory(
+        address,
+        Number(id),
+        (historyPage - 1) * HISTORY_PAGE_SIZE + 1,
+        HISTORY_PAGE_SIZE,
+        { signal: controller.signal },
+      )
+      .then((res) => {
         if (!controller.signal.aborted) setHistory(res.executions || []);
       })
-      .catch(err => {
+      .catch((err) => {
         if (!controller.signal.aborted) {
           setHistory([]);
           setHistoryError(getApiErrorMessage(err));
@@ -87,8 +95,12 @@ export default function DCADetailPage() {
   if (error) {
     return (
       <div className="text-center py-20">
-        <div className="text-4xl mb-3" aria-hidden="true">&#9888;</div>
-        <h2 className="text-lg font-heading font-bold text-text-primary mb-2">Something went wrong</h2>
+        <div className="text-4xl mb-3" aria-hidden="true">
+          &#9888;
+        </div>
+        <h2 className="text-lg font-heading font-bold text-text-primary mb-2">
+          Something went wrong
+        </h2>
         <p className="text-text-muted text-sm mb-6">{error}</p>
         <div className="flex gap-3 justify-center">
           <button
@@ -112,7 +124,10 @@ export default function DCADetailPage() {
     return (
       <div className="text-center py-20">
         <p className="text-text-muted">DCA policy not found.</p>
-        <Link href="/dashboard" className="text-sm text-accent-blue hover:underline mt-2 inline-block">
+        <Link
+          href="/dashboard"
+          className="text-sm text-accent-blue hover:underline mt-2 inline-block"
+        >
           &larr; Back to Dashboard
         </Link>
       </div>
@@ -120,14 +135,20 @@ export default function DCADetailPage() {
   }
 
   const completed = dca.executions_completed;
-  const totalExecs = dca.total_budget && dca.amount_per_swap
-    ? Math.floor(Number(dca.total_budget) / Number(dca.amount_per_swap))
-    : 0;
+  const totalExecs =
+    dca.total_budget && dca.amount_per_swap
+      ? Math.floor(Number(dca.total_budget) / Number(dca.amount_per_swap))
+      : 0;
 
   return (
     <div className="max-w-lg mx-auto">
-      <Link href="/dashboard" className="text-sm text-accent-blue hover:underline">&larr; Dashboard</Link>
-      <h1 className="text-2xl font-heading font-bold text-text-primary mt-4 mb-6">DCA Policy #{dca.id}</h1>
+      <Link href="/dashboard" className="text-sm text-accent-blue hover:underline">
+        &larr; Dashboard
+      </Link>
+      <div className="flex items-center justify-between mt-4 mb-6">
+        <h1 className="text-2xl font-heading font-bold text-text-primary">DCA Policy #{dca.id}</h1>
+        <ShareScheduleButton scheduleType="dca" scheduleId={dca.id} label={dca.label} />
+      </div>
 
       <div className="space-y-3 p-4 rounded-lg border border-border bg-bg-card">
         <DetailRow label="Label" value={dca.label} />
@@ -148,9 +169,9 @@ export default function DCADetailPage() {
         onPageChange={setHistoryPage}
       />
 
-      {dca.status === 'Active' && (
+      {dca.status === "Active" && (
         <button
-          onClick={() => setTxStatus('pending')}
+          onClick={() => setTxStatus("pending")}
           className="mt-6 w-full py-3 rounded-lg bg-accent-red text-white font-medium hover:opacity-90"
         >
           Cancel DCA
@@ -211,7 +232,7 @@ function ExecutionHistory({
               </tr>
             </thead>
             <tbody>
-              {executions.map(record => (
+              {executions.map((record) => (
                 <tr key={record.index} className="border-t border-border">
                   <td className="px-3 py-2 font-mono text-text-primary">{record.index}</td>
                   <td className="px-3 py-2 font-mono text-text-muted">{record.ledger}</td>
