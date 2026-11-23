@@ -34,6 +34,8 @@ export default function DashboardPage() {
   const [streams, setStreams] = useState<StreamEntry[]>([]);
   const [dcas, setDcas] = useState<DCAEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [isStale, setIsStale] = useState(false);
   const activeRequest = useRef<AbortController | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -53,9 +55,14 @@ export default function DashboardPage() {
       .then(([v, s, d]) => {
         if (controller.signal.aborted) return;
         setVaults(v); setStreams(s); setDcas(d);
+        setLastUpdated(new Date());
+        setIsStale(false);
       })
       .catch((err) => {
-        if (!controller.signal.aborted) setError(getApiErrorMessage(err));
+        if (!controller.signal.aborted) {
+          setError(getApiErrorMessage(err));
+          setIsStale(true);
+        }
       })
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);
@@ -132,8 +139,23 @@ export default function DashboardPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-heading font-bold text-text-primary">Dashboard</h1>
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
+        <div>
+          <h1 className="text-2xl font-heading font-bold text-text-primary">Dashboard</h1>
+          {lastUpdated && (
+            <div className="flex items-center gap-2 mt-1 text-xs text-text-muted">
+              <span>Updated: {lastUpdated.toLocaleTimeString()}</span>
+              {isStale && <span className="text-accent-orange font-medium">(stale)</span>}
+              <button
+                onClick={fetchData}
+                className="text-accent-blue hover:underline ml-1 cursor-pointer"
+                title="Refresh dashboard"
+              >
+                Refresh
+              </button>
+            </div>
+          )}
+        </div>
         <Link
           href={tabs.find(t => t.key === tab)?.newLink || '/vault/new'}
           className="px-4 py-2 rounded-lg bg-accent-blue text-white text-sm font-medium hover:opacity-90 transition-opacity"

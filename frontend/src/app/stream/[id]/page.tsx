@@ -7,6 +7,7 @@ import { api, getApiErrorMessage } from '@/lib/api';
 import { useWallet } from '@/lib/store';
 import { TxToast } from '@/components/TxToast';
 import { DetailPageSkeleton } from '@/components/Skeleton';
+import { ShareModal } from '@/components/ShareModal';
 import type { StreamEntry } from '@/types';
 
 export default function StreamDetailPage() {
@@ -15,6 +16,7 @@ export default function StreamDetailPage() {
   const [stream, setStream] = useState<StreamEntry | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
   const [txStatus, setTxStatus] = useState<null | 'pending' | 'success' | 'error'>(null);
 
   const activeRequest = useRef<AbortController | null>(null);
@@ -98,7 +100,15 @@ export default function StreamDetailPage() {
 
   return (
     <div className="max-w-lg mx-auto">
-      <Link href="/dashboard" className="text-sm text-accent-blue hover:underline">&larr; Dashboard</Link>
+      <div className="flex items-center justify-between">
+        <Link href="/dashboard" className="text-sm text-accent-blue hover:underline">&larr; Dashboard</Link>
+        <button
+          onClick={() => setShareOpen(true)}
+          className="text-xs px-3 py-1 rounded border border-border hover:bg-bg-card transition-colors text-text-muted"
+        >
+          Share QR
+        </button>
+      </div>
       <h1 className="text-2xl font-heading font-bold text-text-primary mt-4 mb-6">Stream #{stream.id}</h1>
 
       <div className="space-y-3 p-4 rounded-lg border border-border bg-bg-card">
@@ -122,6 +132,13 @@ export default function StreamDetailPage() {
           Claim
         </button>
       )}
+
+      <ShareModal
+        title={`Stream #${stream.id}`}
+        url={typeof window !== 'undefined' ? window.location.href : ''}
+        isOpen={shareOpen}
+        onClose={() => setShareOpen(false)}
+      />
 
       <TxToast status={txStatus} onClose={() => setTxStatus(null)} />
     </div>
