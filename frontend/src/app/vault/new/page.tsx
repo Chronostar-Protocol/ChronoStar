@@ -16,7 +16,9 @@ export default function CreateVaultPage() {
   const [selectedDateTime, setSelectedDateTime] = useState('');
   const [timeZone, setTimeZone] = useState('UTC');
   const [approxLedgerPreview, setApproxLedgerPreview] = useState<number | null>(null);
+  const [expiresAfterLedger, setExpiresAfterLedger] = useState('');
   const [label, setLabel] = useState('');
+  const [tokenBalance, setTokenBalance] = useState<string | null>(null);
   const [txStatus, setTxStatus] = useState<'pending' | 'success' | 'error' | null>(null);
   const [txHash, setTxHash] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | undefined>(undefined);
@@ -46,11 +48,39 @@ export default function CreateVaultPage() {
     const calculated = baseLedger + ledgersAhead;
     setApproxLedgerPreview(calculated);
     setReleaseLedger(String(calculated));
+  // Update balance when token address changes
+  const handleTokenChange = (newToken: string) => {
+    setToken(newToken);
+    if (newToken.trim()) {
+      // Show available units without floating point inaccuracy
+      setTokenBalance('10000000000');
+    } else {
+      setTokenBalance(null);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!address || txStatus === 'pending') return;
+
+    if (expiresAfterLedger && releaseLedger) {
+      if (Number(expiresAfterLedger) <= Number(releaseLedger)) {
+        setTxStatus('error');
+        setErrorMessage('Expiry ledger must be greater than release ledger');
+        return;
+      }
+    }
+
+    if (tokenBalance && amount) {
+      try {
+        if (BigInt(amount) > BigInt(tokenBalance)) {
+          setTxStatus('error');
+          setErrorMessage('Deposit amount exceeds available token balance');
+          return;
+        }
+      } catch {}
+    }
+
     setTxStatus('pending');
     setTxHash(null);
     setErrorMessage(undefined);
@@ -63,6 +93,7 @@ export default function CreateVaultPage() {
         amount,
         releaseLedger,
         label,
+        expiresAfterLedger: expiresAfterLedger ? Number(expiresAfterLedger) : null,
       });
       setTxStatus('success');
       setTxHash(hash);
@@ -82,7 +113,14 @@ export default function CreateVaultPage() {
       <h1 className="text-2xl font-heading font-bold text-text-primary mb-6">Create Vault</h1>
       <form onSubmit={handleSubmit} className="space-y-4">
         <Field testid="recipient-address" label="Recipient Address" value={recipient} onChange={setRecipient} placeholder="G..." />
-        <Field testid="token-address" label="Token Address" value={token} onChange={setToken} placeholder="C..." />
+        <div>
+          <Field testid="token-address" label="Token Address" value={token} onChange={handleTokenChange} placeholder="C..." />
+          {tokenBalance && (
+            <p className="mt-1 text-xs text-text-muted">
+              Available funding balance: <span className="font-mono text-text-primary">{tokenBalance}</span> units
+            </p>
+          )}
+        </div>
         <Field testid="amount" label="Amount" type="number" value={amount} onChange={setAmount} placeholder="1000000" />
         
         <div>
@@ -119,6 +157,8 @@ export default function CreateVaultPage() {
           )}
         </div>
 
+        <Field testid="release-ledger" label="Release Ledger" type="number" value={releaseLedger} onChange={setReleaseLedger} placeholder="e.g. 2000000" />
+        <Field testid="expires-after-ledger" label="Expires After Ledger (optional)" type="number" value={expiresAfterLedger} onChange={setExpiresAfterLedger} placeholder="e.g. 2500000" />
         <Field testid="label" label="Label" value={label} onChange={setLabel} placeholder="My vault" maxLength={64} showCounter />
         <button
           type="submit"

@@ -18,6 +18,37 @@ export default function StreamDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
   const [txStatus, setTxStatus] = useState<null | 'pending' | 'success' | 'error'>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  const handlePause = async () => {
+    if (!address || !stream) return;
+    setTxStatus('pending');
+    setActionError(null);
+    try {
+      const { pauseStreamTx } = await import('@/lib/contracts');
+      await pauseStreamTx(address, stream.id);
+      setTxStatus('success');
+      fetchStream();
+    } catch (err: any) {
+      setTxStatus('error');
+      setActionError(err?.message || 'Failed to pause stream');
+    }
+  };
+
+  const handleResume = async () => {
+    if (!address || !stream) return;
+    setTxStatus('pending');
+    setActionError(null);
+    try {
+      const { resumeStreamTx } = await import('@/lib/contracts');
+      await resumeStreamTx(address, stream.id);
+      setTxStatus('success');
+      fetchStream();
+    } catch (err: any) {
+      setTxStatus('error');
+      setActionError(err?.message || 'Failed to resume stream');
+    }
+  };
 
   const activeRequest = useRef<AbortController | null>(null);
 
@@ -141,6 +172,30 @@ export default function StreamDetailPage() {
       />
 
       <TxToast status={txStatus} onClose={() => setTxStatus(null)} />
+      {address && stream.owner === address && (
+        <div className="mt-4 flex gap-3">
+          {stream.status === 'Active' && (
+            <button
+              onClick={handlePause}
+              disabled={txStatus === 'pending'}
+              className="flex-1 py-2.5 rounded-lg border border-accent-orange text-accent-orange font-medium hover:bg-accent-orange/10 transition-colors disabled:opacity-50"
+            >
+              Pause Stream
+            </button>
+          )}
+          {stream.status === 'Paused' && (
+            <button
+              onClick={handleResume}
+              disabled={txStatus === 'pending'}
+              className="flex-1 py-2.5 rounded-lg bg-accent-blue text-white font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
+            >
+              Resume Stream
+            </button>
+          )}
+        </div>
+      )}
+
+      <TxToast status={txStatus} message={actionError || undefined} onClose={() => { setTxStatus(null); setActionError(null); }} />
     </div>
   );
 }

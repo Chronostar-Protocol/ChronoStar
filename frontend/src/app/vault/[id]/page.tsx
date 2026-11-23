@@ -100,6 +100,7 @@ export default function VaultDetailPage() {
         <DetailRow label="Recipient" value={vault.recipient} />
         <DetailRow label="Amount" value={vault.amount} />
         <DetailRow label="Release Ledger" value={String(vault.release_ledger)} />
+        <DetailRow label="Expires After Ledger" value={vault.expires_after_ledger ? String(vault.expires_after_ledger) : "None (No Expiry)"} />
         <DetailRow label="Status" value={vault.status} />
       </div>
 
