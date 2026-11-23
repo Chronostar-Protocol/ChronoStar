@@ -12,7 +12,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "node --test src/",
-    "test:integration": "node --test --test-concurrency=1 test/integration.test.js"
+    "test:integration": "node --test --test-concurrency=1 test/integration.test.js",
+    "test:load": "node scripts/ci-load-test.js"
   },
   "dependencies": {
     "@stellar/stellar-sdk": "^13.0.0",
