@@ -1,6 +1,6 @@
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { TxToast } from "./TxToast";
 
 describe("TxToast", () => {
@@ -27,6 +27,48 @@ describe("TxToast", () => {
     expect(link.getAttribute("href")).toBe(`${expected}/tx/abc123`);
     expect(link.getAttribute("target")).toBe("_blank");
     expect(link.getAttribute("rel")).toBe("noopener noreferrer");
+  });
+
+  it("announces pending and success status with polite live-region semantics without moving focus", () => {
+    const { rerender } = render(<TxToast status="pending" message="Submitting transaction" />);
+    const pendingRegion = screen.getByRole("status");
+    expect(pendingRegion.getAttribute("aria-live")).toBe("polite");
+    expect(pendingRegion.getAttribute("aria-atomic")).toBe("true");
+    expect(screen.getByText("Transaction pending:")).toBeTruthy();
+    expect(screen.getByText("Submitting transaction")).toBeTruthy();
+
+    rerender(<TxToast status="success" message="Transaction confirmed" />);
+    const successRegion = screen.getByRole("status");
+    expect(successRegion.getAttribute("aria-live")).toBe("polite");
+    expect(successRegion.getAttribute("aria-atomic")).toBe("true");
+    expect(screen.getByText("Transaction confirmed")).toBeTruthy();
+  });
+
+  it("announces error state with assertive alert priority", () => {
+    render(<TxToast status="error" message="Transaction simulation failed" />);
+    const alertRegion = screen.getByRole("alert");
+    expect(alertRegion.getAttribute("aria-live")).toBe("assertive");
+    expect(alertRegion.getAttribute("aria-atomic")).toBe("true");
+    expect(screen.getByText("Transaction simulation failed")).toBeTruthy();
+  });
+
+  it("allows keyboard dismissal using the dismiss control button", () => {
+    const onClose = vi.fn();
+    render(<TxToast status="success" message="Done" onClose={onClose} />);
+    const dismissButton = screen.getByRole("button", { name: "Dismiss notification" });
+    expect(dismissButton).toBeTruthy();
+    fireEvent.click(dismissButton);
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(screen.queryByText("Done")).toBeNull();
+  });
+
+  it("allows keyboard dismissal by pressing the Escape key", () => {
+    const onClose = vi.fn();
+    render(<TxToast status="success" message="Escape test" onClose={onClose} />);
+    expect(screen.getByText("Escape test")).toBeTruthy();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(screen.queryByText("Escape test")).toBeNull();
   });
 
   it("keeps pending receipts visible beyond 30 seconds and dismisses after confirmation", () => {
