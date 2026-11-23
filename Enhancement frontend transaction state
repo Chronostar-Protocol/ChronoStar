@@ -1,0 +1,19 @@
+# Soroban RPC fixtures
+
+`soroban-read-response.json` is a synthetic Soroban RPC `simulateTransaction`
+response serialized with the backend's locked `@stellar/stellar-sdk` version.
+It uses no live endpoint, account, credential, or private network detail. The
+`retval` XDR contains a struct-like map, nested optional values, enum variants,
+vectors, and integer values at and beyond JavaScript's safe integer boundary.
+
+To regenerate it after changing the fixture shape, run from `backend/`:
+
+```sh
+node test/fixtures/generate-soroban-read-response.mjs
+npm test
+```
+
+The test substitutes the raw response at `_simulateTransaction` and delegates
+to the real Stellar SDK `simulateTransaction` method, so its parser and the
+application's `scValToNative` decoding path remain under test. Transaction
+construction and network access are outside this fixture test.
