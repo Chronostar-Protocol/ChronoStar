@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useWallet } from '@/lib/store';
 import { TxToast } from '@/components/TxToast';
 import { getAddressBook, saveAddressBookEntry, type AddressBookEntry } from '@/lib/addressBook';
@@ -9,6 +9,7 @@ import { getAddressBook, saveAddressBookEntry, type AddressBookEntry } from '@/l
 export default function CreateVaultPage() {
   const { address, isConnected } = useWallet();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [recipient, setRecipient] = useState('');
   const [token, setToken] = useState('');
   const [amount, setAmount] = useState('');
@@ -29,6 +30,14 @@ export default function CreateVaultPage() {
   useEffect(() => {
     setSavedAddresses(getAddressBook());
   }, []);
+
+  useEffect(() => {
+    if (!searchParams.get('duplicate')) return;
+    setRecipient(searchParams.get('recipient') ?? '');
+    setToken(searchParams.get('token') ?? '');
+    setAmount(searchParams.get('amount') ?? '');
+    // Ledger deadlines are intentionally never copied: the user must choose a future value.
+  }, [searchParams]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

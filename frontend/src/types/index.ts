@@ -131,6 +131,60 @@ export interface ScheduleEvent {
   remainingLedgers: number;
 }
 
+export type DashboardSchedule = VaultEntry | StreamEntry | DCAEntry;
+
+/**
+ * Builds a stable, explicit duplication link without copying an id, signature,
+ * or ledger deadline. Create pages may prefill reusable party and token values,
+ * but the user must always choose fresh future-ledger settings and submit.
+ */
+export function scheduleDuplicateHref(schedule: DashboardSchedule): string {
+  const params = new URLSearchParams({ duplicate: String(schedule.id) });
+  if ('recipient' in schedule) params.set('recipient', schedule.recipient);
+  if ('token' in schedule) params.set('token', schedule.token);
+  if ('amount' in schedule) params.set('amount', schedule.amount);
+  if ('total_amount' in schedule) params.set('totalAmount', schedule.total_amount);
+  if ('total_budget' in schedule) {
+    params.set('tokenIn', schedule.token_in);
+    params.set('swapReceiver', schedule.swap_receiver);
+    params.set('totalBudget', schedule.total_budget);
+    params.set('amountPerSwap', schedule.amount_per_swap);
+    params.set('intervalLedgers', String(schedule.interval_ledgers));
+  }
+
+  const path = 'release_ledger' in schedule
+    ? '/vault/new'
+    : 'end_ledger' in schedule
+      ? '/stream/new'
+      : '/dca/new';
+  return `${path}?${params.toString()}`;
+}
+
+/** Escapes a spreadsheet cell while preserving large token-unit strings exactly. */
+export function escapeCsvCell(value: unknown): string {
+  const raw = String(value ?? '');
+  const safe = /^[=+\-@]/.test(raw.trimStart()) ? `'${raw}` : raw;
+  return `"${safe.replace(/"/g, '""')}"`;
+}
+
+/**
+ * Produces a portable dashboard export. Amount fields deliberately remain raw
+ * integer strings: formatting them as JavaScript numbers would lose precision.
+ */
+export function dashboardSchedulesCsv(
+  vaults: VaultEntry[],
+  streams: StreamEntry[],
+  dcas: DCAEntry[],
+): string {
+  const header = ['type', 'id', 'token', 'status', 'raw_amount_units', 'recipient_or_receiver'];
+  const rows = [
+    ...vaults.map((vault) => ['vault', vault.id, vault.token, vault.status, vault.amount, vault.recipient]),
+    ...streams.map((stream) => ['stream', stream.id, stream.token, stream.status, stream.total_amount, stream.recipient]),
+    ...dcas.map((dca) => ['dca', dca.id, `${dca.token_in}->${dca.token_out ?? ''}`, dca.status, dca.total_budget, dca.swap_receiver]),
+  ];
+  return [header, ...rows].map((row) => row.map(escapeCsvCell).join(',')).join('\r\n');
+}
+
 export interface Stats {
   vaults: { total: number; active: number; released: number; paused?: number; reclaimed?: number };
   streams: { total: number; active: number; completed: number; paused?: number };

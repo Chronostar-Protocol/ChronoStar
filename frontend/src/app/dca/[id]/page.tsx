@@ -8,7 +8,7 @@ import { useWallet } from '@/lib/store';
 import { TxToast } from '@/components/TxToast';
 import { DetailPageSkeleton } from '@/components/Skeleton';
 import { ShareModal } from '@/components/ShareModal';
-import type { DCAEntry, DCAExecution } from '@/types';
+import { scheduleDuplicateHref, type DCAEntry, type DCAExecution } from '@/types';
 
 const HISTORY_PAGE_SIZE = 10;
 
@@ -161,12 +161,14 @@ export default function DCADetailPage() {
     <div className="max-w-lg mx-auto">
       <div className="flex items-center justify-between">
         <Link href="/dashboard" className="text-sm text-accent-blue hover:underline">&larr; Dashboard</Link>
-        <button
-          onClick={() => setShareOpen(true)}
-          className="text-xs px-3 py-1 rounded border border-border hover:bg-bg-card transition-colors text-text-muted"
-        >
-          Share QR
-        </button>
+        <div className="flex gap-2">
+          <Link href={scheduleDuplicateHref(dca)} className="text-xs px-3 py-1 rounded border border-border hover:bg-bg-card transition-colors text-text-muted">
+            Duplicate
+          </Link>
+          <button onClick={() => setShareOpen(true)} className="text-xs px-3 py-1 rounded border border-border hover:bg-bg-card transition-colors text-text-muted">
+            Share QR
+          </button>
+        </div>
       </div>
       <h1 className="text-2xl font-heading font-bold text-text-primary mt-4 mb-6">DCA Policy #{dca.id}</h1>
 
