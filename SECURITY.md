@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-Security fixes are applied to the latest version on the master branch. ChronoStar is under active development, so older commits and unreleased development snapshots are not supported security targets.
+Security fixes are applied to the latest version on the master branch. ChronoStar is under active development, so older commits and unreleased development snapshots are not supported security targets. 
 
 ## Reporting a Vulnerability
 
