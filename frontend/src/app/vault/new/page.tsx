@@ -1,9 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useWallet } from '@/lib/store';
 import { TxToast } from '@/components/TxToast';
+import { getAddressBook, saveAddressBookEntry, type AddressBookEntry } from '@/lib/addressBook';
 
 export default function CreateVaultPage() {
   const { address, isConnected } = useWallet();
@@ -18,12 +19,23 @@ export default function CreateVaultPage() {
   const [approxLedgerPreview, setApproxLedgerPreview] = useState<number | null>(null);
   const [expiresAfterLedger, setExpiresAfterLedger] = useState('');
   const [label, setLabel] = useState('');
+  const [saveToBook, setSaveToBook] = useState(false);
+  const [savedAddresses, setSavedAddresses] = useState<AddressBookEntry[]>([]);
   const [tokenBalance, setTokenBalance] = useState<string | null>(null);
   const [txStatus, setTxStatus] = useState<'pending' | 'success' | 'error' | null>(null);
   const [txHash, setTxHash] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | undefined>(undefined);
 
   useEffect(() => {
+    setSavedAddresses(getAddressBook());
+  }, []);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!address || txStatus === 'pending') return;
+    if (saveToBook && recipient) {
+      saveAddressBookEntry({ address: recipient, label: label || 'Vault Recipient' });
+    }
     try {
       setTimeZone(Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
     } catch {}
@@ -112,7 +124,36 @@ export default function CreateVaultPage() {
     <div className="max-w-lg mx-auto">
       <h1 className="text-2xl font-heading font-bold text-text-primary mb-6">Create Vault</h1>
       <form onSubmit={handleSubmit} className="space-y-4">
+        {savedAddresses.length > 0 && (
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-xs text-text-muted">Address book:</span>
+            <select
+              className="text-xs bg-bg-card border border-border rounded px-2 py-1 text-text-primary focus:outline-none"
+              onChange={(e) => {
+                if (e.target.value) setRecipient(e.target.value);
+              }}
+              defaultValue=""
+            >
+              <option value="" disabled>Pick saved recipient</option>
+              {savedAddresses.map((entry) => (
+                <option key={entry.address} value={entry.address}>
+                  {entry.label} ({entry.address.slice(0, 4)}...{entry.address.slice(-4)})
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
         <Field testid="recipient-address" label="Recipient Address" value={recipient} onChange={setRecipient} placeholder="G..." />
+        <label className="flex items-center gap-2 text-xs text-text-muted cursor-pointer">
+          <input
+            type="checkbox"
+            checked={saveToBook}
+            onChange={(e) => setSaveToBook(e.target.checked)}
+            className="rounded border-border"
+          />
+          Save recipient to address book
+        </label>
+        <Field testid="token-address" label="Token Address" value={token} onChange={setToken} placeholder="C..." />
         <div>
           <Field testid="token-address" label="Token Address" value={token} onChange={handleTokenChange} placeholder="C..." />
           {tokenBalance && (

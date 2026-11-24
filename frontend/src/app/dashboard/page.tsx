@@ -5,9 +5,11 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useWallet } from '@/lib/store';
 import { api, getApiErrorMessage } from '@/lib/api';
 import { DashboardSkeleton } from '@/components/Skeleton';
+import { useI18n } from '@/lib/i18n';
 import type { VaultEntry, StreamEntry, DCAEntry } from '@/types';
 
 type Tab = 'vaults' | 'streams' | 'dca';
+type RoleFilter = 'all' | 'owner' | 'recipient';
 
 function ErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
@@ -29,7 +31,9 @@ function ErrorState({ message, onRetry }: { message: string; onRetry: () => void
 
 export default function DashboardPage() {
   const { address, isConnected } = useWallet();
+  const { t } = useI18n();
   const [tab, setTab] = useState<Tab>('vaults');
+  const [roleFilter, setRoleFilter] = useState<RoleFilter>('all');
   const [vaults, setVaults] = useState<VaultEntry[]>([]);
   const [streams, setStreams] = useState<StreamEntry[]>([]);
   const [dcas, setDcas] = useState<DCAEntry[]>([]);
@@ -131,15 +135,66 @@ export default function DashboardPage() {
     return <DashboardSkeleton />;
   }
 
+  const filteredVaults = vaults.filter((v) => {
+    if (roleFilter === 'owner') return v.owner === address;
+    if (roleFilter === 'recipient') return v.recipient === address;
+    return true;
+  });
+  const filteredStreams = streams.filter((s) => {
+    if (roleFilter === 'owner') return s.owner === address;
+    if (roleFilter === 'recipient') return s.recipient === address;
+    return true;
+  });
+  const filteredDcas = dcas.filter((d) => {
+    if (roleFilter === 'owner') return d.owner === address;
+    if (roleFilter === 'recipient') return d.swap_receiver === address;
+    return true;
+  });
+
   const tabs: { key: Tab; label: string; count: number; newLink: string }[] = [
-    { key: 'vaults', label: 'Vaults', count: vaults.length, newLink: '/vault/new' },
-    { key: 'streams', label: 'Streams', count: streams.length, newLink: '/stream/new' },
-    { key: 'dca', label: 'DCA', count: dcas.length, newLink: '/dca/new' },
+    { key: 'vaults', label: 'Vaults', count: filteredVaults.length, newLink: '/vault/new' },
+    { key: 'streams', label: 'Streams', count: filteredStreams.length, newLink: '/stream/new' },
+    { key: 'dca', label: 'DCA', count: filteredDcas.length, newLink: '/dca/new' },
   ];
 
   return (
     <div>
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
+        <h1 className="text-2xl font-heading font-bold text-text-primary">{t.dashboard.title}</h1>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center border border-border rounded-lg p-0.5 bg-bg-card text-xs">
+            <button
+              onClick={() => setRoleFilter('all')}
+              className={`px-3 py-1 rounded-md transition-colors ${
+                roleFilter === 'all' ? 'bg-accent-blue text-white font-medium' : 'text-text-muted hover:text-text-primary'
+              }`}
+            >
+              {t.dashboard.allRoles}
+            </button>
+            <button
+              onClick={() => setRoleFilter('owner')}
+              className={`px-3 py-1 rounded-md transition-colors ${
+                roleFilter === 'owner' ? 'bg-accent-blue text-white font-medium' : 'text-text-muted hover:text-text-primary'
+              }`}
+            >
+              {t.dashboard.ownerRole}
+            </button>
+            <button
+              onClick={() => setRoleFilter('recipient')}
+              className={`px-3 py-1 rounded-md transition-colors ${
+                roleFilter === 'recipient' ? 'bg-accent-blue text-white font-medium' : 'text-text-muted hover:text-text-primary'
+              }`}
+            >
+              {t.dashboard.recipientRole}
+            </button>
+          </div>
+          <Link
+            href={tabs.find((t) => t.key === tab)?.newLink || '/vault/new'}
+            className="px-4 py-2 rounded-lg bg-accent-blue text-white text-sm font-medium hover:opacity-90 transition-opacity whitespace-nowrap"
+          >
+            New {tab === 'vaults' ? 'Vault' : tab === 'streams' ? 'Stream' : 'DCA'}
+          </Link>
+        </div>
         <div>
           <h1 className="text-2xl font-heading font-bold text-text-primary">Dashboard</h1>
           {lastUpdated && (
@@ -165,7 +220,7 @@ export default function DashboardPage() {
       </div>
 
       <div className="flex gap-1 border-b border-border mb-6">
-        {tabs.map(t => (
+        {tabs.map((t) => (
           <button
             key={t.key}
             onClick={() => setTab(t.key)}
@@ -180,9 +235,9 @@ export default function DashboardPage() {
         ))}
       </div>
 
-      {tab === 'vaults' && <ItemList items={vaults} type="vault" />}
-      {tab === 'streams' && <ItemList items={streams} type="stream" />}
-      {tab === 'dca' && <ItemList items={dcas} type="dca" />}
+      {tab === 'vaults' && <ItemList items={filteredVaults} type="vault" />}
+      {tab === 'streams' && <ItemList items={filteredStreams} type="stream" />}
+      {tab === 'dca' && <ItemList items={filteredDcas} type="dca" />}
     </div>
   );
 }
