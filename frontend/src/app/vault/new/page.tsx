@@ -12,6 +12,10 @@ export default function CreateVaultPage() {
   const [token, setToken] = useState('');
   const [amount, setAmount] = useState('');
   const [releaseLedger, setReleaseLedger] = useState('');
+  const [useDatePicker, setUseDatePicker] = useState(false);
+  const [selectedDateTime, setSelectedDateTime] = useState('');
+  const [timeZone, setTimeZone] = useState('UTC');
+  const [approxLedgerPreview, setApproxLedgerPreview] = useState<number | null>(null);
   const [expiresAfterLedger, setExpiresAfterLedger] = useState('');
   const [label, setLabel] = useState('');
   const [tokenBalance, setTokenBalance] = useState<string | null>(null);
@@ -19,6 +23,31 @@ export default function CreateVaultPage() {
   const [txHash, setTxHash] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | undefined>(undefined);
 
+  useEffect(() => {
+    try {
+      setTimeZone(Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
+    } catch {}
+  }, []);
+
+  const handleDateChange = (val: string) => {
+    setSelectedDateTime(val);
+    if (!val) {
+      setApproxLedgerPreview(null);
+      return;
+    }
+    const targetMs = new Date(val).getTime();
+    const nowMs = Date.now();
+    const diffSec = Math.floor((targetMs - nowMs) / 1000);
+    if (diffSec <= 0) {
+      setApproxLedgerPreview(null);
+      return;
+    }
+    // Stellar ledger time ~5 seconds per ledger
+    const baseLedger = 2000000;
+    const ledgersAhead = Math.floor(diffSec / 5);
+    const calculated = baseLedger + ledgersAhead;
+    setApproxLedgerPreview(calculated);
+    setReleaseLedger(String(calculated));
   // Update balance when token address changes
   const handleTokenChange = (newToken: string) => {
     setToken(newToken);
@@ -93,6 +122,41 @@ export default function CreateVaultPage() {
           )}
         </div>
         <Field testid="amount" label="Amount" type="number" value={amount} onChange={setAmount} placeholder="1000000" />
+        
+        <div>
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-sm text-text-muted">Release Schedule</span>
+            <button
+              type="button"
+              onClick={() => setUseDatePicker(!useDatePicker)}
+              className="text-xs text-accent-blue hover:underline"
+            >
+              {useDatePicker ? "Switch to Exact Ledger" : "Choose Date/Time"}
+            </button>
+          </div>
+          {useDatePicker ? (
+            <div className="p-3 rounded-lg border border-border bg-bg-card space-y-2">
+              <label className="block text-xs text-text-muted">
+                Calendar Release Date & Time ({timeZone})
+              </label>
+              <input
+                type="datetime-local"
+                value={selectedDateTime}
+                onChange={(e) => handleDateChange(e.target.value)}
+                className="w-full px-3 py-2 text-sm rounded border border-border bg-bg-primary text-text-primary focus:outline-none"
+                required
+              />
+              {approxLedgerPreview && (
+                <p className="text-xs text-text-muted">
+                  Approximate target ledger: <span className="font-mono text-accent-blue">{approxLedgerPreview}</span>
+                </p>
+              )}
+            </div>
+          ) : (
+            <Field testid="release-ledger" label="Release Ledger" type="number" value={releaseLedger} onChange={setReleaseLedger} placeholder="e.g. 2000000" />
+          )}
+        </div>
+
         <Field testid="release-ledger" label="Release Ledger" type="number" value={releaseLedger} onChange={setReleaseLedger} placeholder="e.g. 2000000" />
         <Field testid="expires-after-ledger" label="Expires After Ledger (optional)" type="number" value={expiresAfterLedger} onChange={setExpiresAfterLedger} placeholder="e.g. 2500000" />
         <Field testid="label" label="Label" value={label} onChange={setLabel} placeholder="My vault" maxLength={64} showCounter />

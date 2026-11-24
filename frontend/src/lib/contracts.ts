@@ -369,3 +369,22 @@ export async function createDcaTx(
 
   return buildAndSignContractTx(senderAddress, contractId, "create_dca", args, options);
 }
+
+/**
+ * Builds and signs a `top_up` DCA Soroban transaction.
+ */
+export async function topUpDcaTx(
+  senderAddress: string,
+  dcaId: number | bigint,
+  amount: string,
+  options?: ContractTxOptions,
+): Promise<{ hash: string; xdr?: string }> {
+  const amountBig = validateIntegerAmount(amount, "amount");
+  const contractId = options?.contractId || config.dcaContractId;
+  if (!contractId) throw new Error("DCA contract ID is not configured");
+  const args: xdr.ScVal[] = [
+    nativeToScVal(BigInt(dcaId), { type: "u64" }),
+    nativeToScVal(amountBig, { type: "i128" }),
+  ];
+  return buildAndSignContractTx(senderAddress, contractId, "top_up", args, options);
+}

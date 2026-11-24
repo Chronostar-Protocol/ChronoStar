@@ -7,6 +7,7 @@ import { api, getApiErrorMessage } from '@/lib/api';
 import { useWallet } from '@/lib/store';
 import { TxToast } from '@/components/TxToast';
 import { DetailPageSkeleton } from '@/components/Skeleton';
+import { ShareModal } from '@/components/ShareModal';
 import type { DCAEntry, DCAExecution } from '@/types';
 
 const HISTORY_PAGE_SIZE = 10;
@@ -18,11 +19,43 @@ export default function DCADetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [txStatus, setTxStatus] = useState<null | 'pending' | 'success' | 'error'>(null);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [topUpAmount, setTopUpAmount] = useState('');
+  const [topUpOpen, setTopUpOpen] = useState(false);
+  const [topUpError, setTopUpError] = useState<string | null>(null);
   const [history, setHistory] = useState<DCAExecution[]>([]);
   const [historyPage, setHistoryPage] = useState(1);
   const [historyError, setHistoryError] = useState<string | null>(null);
 
   const activeRequest = useRef<AbortController | null>(null);
+
+  const handleTopUp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!address || !dca || !topUpAmount) return;
+    setTopUpError(null);
+    try {
+      const topUpBig = BigInt(topUpAmount);
+      const perSwapBig = BigInt(dca.amount_per_swap);
+      if (topUpBig <= 0n) {
+        setTopUpError('Top-up amount must be greater than zero');
+        return;
+      }
+      if (topUpBig % perSwapBig !== 0n) {
+        setTopUpError(`Top-up amount must be a multiple of ${dca.amount_per_swap}`);
+        return;
+      }
+      setTxStatus('pending');
+      const { topUpDcaTx } = await import('@/lib/contracts');
+      await topUpDcaTx(address, dca.id, topUpAmount);
+      setTxStatus('success');
+      setTopUpOpen(false);
+      setTopUpAmount('');
+      fetchDCA();
+    } catch (err: any) {
+      setTxStatus('error');
+      setTopUpError(err?.message || 'Top-up failed');
+    }
+  };
 
   const fetchDCA = useCallback(() => {
     activeRequest.current?.abort();
@@ -126,7 +159,15 @@ export default function DCADetailPage() {
 
   return (
     <div className="max-w-lg mx-auto">
-      <Link href="/dashboard" className="text-sm text-accent-blue hover:underline">&larr; Dashboard</Link>
+      <div className="flex items-center justify-between">
+        <Link href="/dashboard" className="text-sm text-accent-blue hover:underline">&larr; Dashboard</Link>
+        <button
+          onClick={() => setShareOpen(true)}
+          className="text-xs px-3 py-1 rounded border border-border hover:bg-bg-card transition-colors text-text-muted"
+        >
+          Share QR
+        </button>
+      </div>
       <h1 className="text-2xl font-heading font-bold text-text-primary mt-4 mb-6">DCA Policy #{dca.id}</h1>
 
       <div className="space-y-3 p-4 rounded-lg border border-border bg-bg-card">
@@ -138,6 +179,45 @@ export default function DCADetailPage() {
         <DetailRow label="Next Execution" value={String(dca.next_execution_ledger)} />
         <DetailRow label="Status" value={dca.status} />
       </div>
+
+      {address && dca.owner === address && dca.status !== 'Cancelled' && (
+        <div className="mt-4 p-4 rounded-lg border border-border bg-bg-card">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm font-medium text-text-primary">Owner Budget Top-Up</span>
+            <button
+              onClick={() => setTopUpOpen(!topUpOpen)}
+              className="text-xs text-accent-blue hover:underline"
+            >
+              {topUpOpen ? 'Cancel' : 'Top Up'}
+            </button>
+          </div>
+          {topUpOpen && (
+            <form onSubmit={handleTopUp} className="space-y-3 mt-3">
+              <div>
+                <label className="block text-xs text-text-muted mb-1">
+                  Top-Up Amount (must be multiple of {dca.amount_per_swap})
+                </label>
+                <input
+                  type="number"
+                  value={topUpAmount}
+                  onChange={(e) => setTopUpAmount(e.target.value)}
+                  placeholder={dca.amount_per_swap}
+                  className="w-full px-3 py-2 text-sm rounded border border-border bg-bg-primary text-text-primary focus:outline-none"
+                  required
+                />
+              </div>
+              {topUpError && <p className="text-xs text-accent-red">{topUpError}</p>}
+              <button
+                type="submit"
+                disabled={txStatus === 'pending'}
+                className="w-full py-2 rounded bg-accent-blue text-white text-sm font-medium hover:opacity-90 disabled:opacity-50 transition-opacity"
+              >
+                {txStatus === 'pending' ? 'Submitting...' : 'Confirm Top-Up'}
+              </button>
+            </form>
+          )}
+        </div>
+      )}
 
       <ExecutionHistory
         executions={history}
@@ -156,6 +236,13 @@ export default function DCADetailPage() {
           Cancel DCA
         </button>
       )}
+
+      <ShareModal
+        title={`DCA Policy #${dca.id}`}
+        url={typeof window !== 'undefined' ? window.location.href : ''}
+        isOpen={shareOpen}
+        onClose={() => setShareOpen(false)}
+      />
 
       <TxToast status={txStatus} onClose={() => setTxStatus(null)} />
     </div>
