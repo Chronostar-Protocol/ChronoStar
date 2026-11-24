@@ -102,7 +102,7 @@ npm start
 
 The keeper and backend services can be deployed on Render using the root blueprint [`render.yaml`](./render.yaml) (`chronostar-backend` web service and `chronostar-keeper` background worker).
 
-## API Endpoints
+## API Endpoints 
 
 Base URL: `https://chronostar-backend-s905.onrender.com`
 
