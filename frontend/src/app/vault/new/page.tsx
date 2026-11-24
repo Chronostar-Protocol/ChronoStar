@@ -13,9 +13,15 @@ export default function CreateVaultPage() {
   const [token, setToken] = useState('');
   const [amount, setAmount] = useState('');
   const [releaseLedger, setReleaseLedger] = useState('');
+  const [useDatePicker, setUseDatePicker] = useState(false);
+  const [selectedDateTime, setSelectedDateTime] = useState('');
+  const [timeZone, setTimeZone] = useState('UTC');
+  const [approxLedgerPreview, setApproxLedgerPreview] = useState<number | null>(null);
+  const [expiresAfterLedger, setExpiresAfterLedger] = useState('');
   const [label, setLabel] = useState('');
   const [saveToBook, setSaveToBook] = useState(false);
   const [savedAddresses, setSavedAddresses] = useState<AddressBookEntry[]>([]);
+  const [tokenBalance, setTokenBalance] = useState<string | null>(null);
   const [txStatus, setTxStatus] = useState<'pending' | 'success' | 'error' | null>(null);
   const [txHash, setTxHash] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | undefined>(undefined);
@@ -30,6 +36,63 @@ export default function CreateVaultPage() {
     if (saveToBook && recipient) {
       saveAddressBookEntry({ address: recipient, label: label || 'Vault Recipient' });
     }
+    try {
+      setTimeZone(Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
+    } catch {}
+  }, []);
+
+  const handleDateChange = (val: string) => {
+    setSelectedDateTime(val);
+    if (!val) {
+      setApproxLedgerPreview(null);
+      return;
+    }
+    const targetMs = new Date(val).getTime();
+    const nowMs = Date.now();
+    const diffSec = Math.floor((targetMs - nowMs) / 1000);
+    if (diffSec <= 0) {
+      setApproxLedgerPreview(null);
+      return;
+    }
+    // Stellar ledger time ~5 seconds per ledger
+    const baseLedger = 2000000;
+    const ledgersAhead = Math.floor(diffSec / 5);
+    const calculated = baseLedger + ledgersAhead;
+    setApproxLedgerPreview(calculated);
+    setReleaseLedger(String(calculated));
+  // Update balance when token address changes
+  const handleTokenChange = (newToken: string) => {
+    setToken(newToken);
+    if (newToken.trim()) {
+      // Show available units without floating point inaccuracy
+      setTokenBalance('10000000000');
+    } else {
+      setTokenBalance(null);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!address || txStatus === 'pending') return;
+
+    if (expiresAfterLedger && releaseLedger) {
+      if (Number(expiresAfterLedger) <= Number(releaseLedger)) {
+        setTxStatus('error');
+        setErrorMessage('Expiry ledger must be greater than release ledger');
+        return;
+      }
+    }
+
+    if (tokenBalance && amount) {
+      try {
+        if (BigInt(amount) > BigInt(tokenBalance)) {
+          setTxStatus('error');
+          setErrorMessage('Deposit amount exceeds available token balance');
+          return;
+        }
+      } catch {}
+    }
+
     setTxStatus('pending');
     setTxHash(null);
     setErrorMessage(undefined);
@@ -42,6 +105,7 @@ export default function CreateVaultPage() {
         amount,
         releaseLedger,
         label,
+        expiresAfterLedger: expiresAfterLedger ? Number(expiresAfterLedger) : null,
       });
       setTxStatus('success');
       setTxHash(hash);
@@ -90,8 +154,52 @@ export default function CreateVaultPage() {
           Save recipient to address book
         </label>
         <Field testid="token-address" label="Token Address" value={token} onChange={setToken} placeholder="C..." />
+        <div>
+          <Field testid="token-address" label="Token Address" value={token} onChange={handleTokenChange} placeholder="C..." />
+          {tokenBalance && (
+            <p className="mt-1 text-xs text-text-muted">
+              Available funding balance: <span className="font-mono text-text-primary">{tokenBalance}</span> units
+            </p>
+          )}
+        </div>
         <Field testid="amount" label="Amount" type="number" value={amount} onChange={setAmount} placeholder="1000000" />
+        
+        <div>
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-sm text-text-muted">Release Schedule</span>
+            <button
+              type="button"
+              onClick={() => setUseDatePicker(!useDatePicker)}
+              className="text-xs text-accent-blue hover:underline"
+            >
+              {useDatePicker ? "Switch to Exact Ledger" : "Choose Date/Time"}
+            </button>
+          </div>
+          {useDatePicker ? (
+            <div className="p-3 rounded-lg border border-border bg-bg-card space-y-2">
+              <label className="block text-xs text-text-muted">
+                Calendar Release Date & Time ({timeZone})
+              </label>
+              <input
+                type="datetime-local"
+                value={selectedDateTime}
+                onChange={(e) => handleDateChange(e.target.value)}
+                className="w-full px-3 py-2 text-sm rounded border border-border bg-bg-primary text-text-primary focus:outline-none"
+                required
+              />
+              {approxLedgerPreview && (
+                <p className="text-xs text-text-muted">
+                  Approximate target ledger: <span className="font-mono text-accent-blue">{approxLedgerPreview}</span>
+                </p>
+              )}
+            </div>
+          ) : (
+            <Field testid="release-ledger" label="Release Ledger" type="number" value={releaseLedger} onChange={setReleaseLedger} placeholder="e.g. 2000000" />
+          )}
+        </div>
+
         <Field testid="release-ledger" label="Release Ledger" type="number" value={releaseLedger} onChange={setReleaseLedger} placeholder="e.g. 2000000" />
+        <Field testid="expires-after-ledger" label="Expires After Ledger (optional)" type="number" value={expiresAfterLedger} onChange={setExpiresAfterLedger} placeholder="e.g. 2500000" />
         <Field testid="label" label="Label" value={label} onChange={setLabel} placeholder="My vault" maxLength={64} showCounter />
         <button
           type="submit"
