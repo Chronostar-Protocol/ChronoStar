@@ -44,6 +44,7 @@ export default defineConfig({
           label: 'Integration',
           items: [
             { label: 'Lodestar', link: '/integration/lodestar/' },
+            { label: 'Executable examples', link: '/integration/executable-examples/' },
           ],
         },
       ],
