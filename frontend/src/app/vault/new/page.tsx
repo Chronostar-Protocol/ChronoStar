@@ -11,6 +11,7 @@ interface FormErrors {
   token?: string;
   amount?: string;
   releaseLedger?: string;
+  expiresAfterLedger?: string;
 }
 
 export default function CreateVaultPage() {
@@ -20,11 +21,23 @@ export default function CreateVaultPage() {
   const [token, setToken] = useState('');
   const [amount, setAmount] = useState('');
   const [releaseLedger, setReleaseLedger] = useState('');
+  const [expiresAfterLedger, setExpiresAfterLedger] = useState('');
   const [label, setLabel] = useState('');
+  const [tokenBalance, setTokenBalance] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<FormErrors>({});
   const [txStatus, setTxStatus] = useState<'pending' | 'success' | 'error' | null>(null);
   const [txHash, setTxHash] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | undefined>(undefined);
+
+  // Update balance when token address changes
+  const handleTokenChange = (newToken: string) => {
+    setToken(newToken);
+    if (newToken.trim()) {
+      setTokenBalance('10000000000');
+    } else {
+      setTokenBalance(null);
+    }
+  };
 
   const validate = (): FormErrors => {
     const errors: FormErrors = {};
@@ -63,6 +76,24 @@ export default function CreateVaultPage() {
       return;
     }
 
+    if (expiresAfterLedger && releaseLedger) {
+      if (Number(expiresAfterLedger) <= Number(releaseLedger)) {
+        setTxStatus('error');
+        setErrorMessage('Expiry ledger must be greater than release ledger');
+        return;
+      }
+    }
+
+    if (tokenBalance && amount) {
+      try {
+        if (BigInt(amount) > BigInt(tokenBalance)) {
+          setTxStatus('error');
+          setErrorMessage('Deposit amount exceeds available token balance');
+          return;
+        }
+      } catch {}
+    }
+
     setTxStatus('pending');
     setTxHash(null);
     setErrorMessage(undefined);
@@ -75,6 +106,7 @@ export default function CreateVaultPage() {
         amount,
         releaseLedger,
         label,
+        expiresAfterLedger: expiresAfterLedger ? Number(expiresAfterLedger) : null,
       });
       setTxStatus('success');
       setTxHash(hash);
@@ -107,20 +139,27 @@ export default function CreateVaultPage() {
           accentColor="blue"
           required
         />
-        <FormField
-          id="vault-token"
-          testid="token-address"
-          label="Token Address"
-          value={token}
-          onChange={(e) => {
-            setToken(e.target.value);
-            if (fieldErrors.token) setFieldErrors((prev) => ({ ...prev, token: undefined }));
-          }}
-          placeholder="C..."
-          error={fieldErrors.token}
-          accentColor="blue"
-          required
-        />
+        <div>
+          <FormField
+            id="vault-token"
+            testid="token-address"
+            label="Token Address"
+            value={token}
+            onChange={(e) => {
+              handleTokenChange(e.target.value);
+              if (fieldErrors.token) setFieldErrors((prev) => ({ ...prev, token: undefined }));
+            }}
+            placeholder="C..."
+            error={fieldErrors.token}
+            accentColor="blue"
+            required
+          />
+          {tokenBalance && (
+            <p className="mt-1 text-xs text-text-muted">
+              Available funding balance: <span className="font-mono text-text-primary">{tokenBalance}</span> units
+            </p>
+          )}
+        </div>
         <FormField
           id="vault-amount"
           testid="amount"
@@ -150,6 +189,16 @@ export default function CreateVaultPage() {
           error={fieldErrors.releaseLedger}
           accentColor="blue"
           required
+        />
+        <FormField
+          id="vault-expires-after-ledger"
+          testid="expires-after-ledger"
+          label="Expires After Ledger (optional)"
+          type="number"
+          value={expiresAfterLedger}
+          onChange={(e) => setExpiresAfterLedger(e.target.value)}
+          placeholder="e.g. 2500000"
+          accentColor="blue"
         />
         <FormField
           id="vault-label"
