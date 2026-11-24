@@ -4,6 +4,15 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useWallet } from '@/lib/store';
 import { TxToast } from '@/components/TxToast';
+import { FormField } from '@/components/FormField';
+
+interface FormErrors {
+  recipient?: string;
+  token?: string;
+  amount?: string;
+  releaseLedger?: string;
+  expiresAfterLedger?: string;
+}
 
 export default function CreateVaultPage() {
   const { address, isConnected } = useWallet();
@@ -15,6 +24,7 @@ export default function CreateVaultPage() {
   const [expiresAfterLedger, setExpiresAfterLedger] = useState('');
   const [label, setLabel] = useState('');
   const [tokenBalance, setTokenBalance] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<FormErrors>({});
   const [txStatus, setTxStatus] = useState<'pending' | 'success' | 'error' | null>(null);
   const [txHash, setTxHash] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | undefined>(undefined);
@@ -23,16 +33,48 @@ export default function CreateVaultPage() {
   const handleTokenChange = (newToken: string) => {
     setToken(newToken);
     if (newToken.trim()) {
-      // Show available units without floating point inaccuracy
       setTokenBalance('10000000000');
     } else {
       setTokenBalance(null);
     }
   };
 
+  const validate = (): FormErrors => {
+    const errors: FormErrors = {};
+    if (!recipient.trim()) {
+      errors.recipient = 'Recipient address is required';
+    }
+    if (!token.trim()) {
+      errors.token = 'Token address is required';
+    }
+    if (!amount.trim() || Number(amount) <= 0) {
+      errors.amount = 'Amount must be greater than 0';
+    }
+    if (!releaseLedger.trim() || Number(releaseLedger) <= 0) {
+      errors.releaseLedger = 'Release ledger must be greater than 0';
+    }
+    return errors;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!address || txStatus === 'pending') return;
+
+    const errors = validate();
+    setFieldErrors(errors);
+
+    if (Object.keys(errors).length > 0) {
+      if (errors.recipient) {
+        document.getElementById('vault-recipient')?.focus();
+      } else if (errors.token) {
+        document.getElementById('vault-token')?.focus();
+      } else if (errors.amount) {
+        document.getElementById('vault-amount')?.focus();
+      } else if (errors.releaseLedger) {
+        document.getElementById('vault-release-ledger')?.focus();
+      }
+      return;
+    }
 
     if (expiresAfterLedger && releaseLedger) {
       if (Number(expiresAfterLedger) <= Number(releaseLedger)) {
@@ -82,20 +124,93 @@ export default function CreateVaultPage() {
   return (
     <div className="max-w-lg mx-auto">
       <h1 className="text-2xl font-heading font-bold text-text-primary mb-6">Create Vault</h1>
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <Field testid="recipient-address" label="Recipient Address" value={recipient} onChange={setRecipient} placeholder="G..." />
+      <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+        <FormField
+          id="vault-recipient"
+          testid="recipient-address"
+          label="Recipient Address"
+          value={recipient}
+          onChange={(e) => {
+            setRecipient(e.target.value);
+            if (fieldErrors.recipient) setFieldErrors((prev) => ({ ...prev, recipient: undefined }));
+          }}
+          placeholder="G..."
+          error={fieldErrors.recipient}
+          accentColor="blue"
+          required
+        />
         <div>
-          <Field testid="token-address" label="Token Address" value={token} onChange={handleTokenChange} placeholder="C..." />
+          <FormField
+            id="vault-token"
+            testid="token-address"
+            label="Token Address"
+            value={token}
+            onChange={(e) => {
+              handleTokenChange(e.target.value);
+              if (fieldErrors.token) setFieldErrors((prev) => ({ ...prev, token: undefined }));
+            }}
+            placeholder="C..."
+            error={fieldErrors.token}
+            accentColor="blue"
+            required
+          />
           {tokenBalance && (
             <p className="mt-1 text-xs text-text-muted">
               Available funding balance: <span className="font-mono text-text-primary">{tokenBalance}</span> units
             </p>
           )}
         </div>
-        <Field testid="amount" label="Amount" type="number" value={amount} onChange={setAmount} placeholder="1000000" />
-        <Field testid="release-ledger" label="Release Ledger" type="number" value={releaseLedger} onChange={setReleaseLedger} placeholder="e.g. 2000000" />
-        <Field testid="expires-after-ledger" label="Expires After Ledger (optional)" type="number" value={expiresAfterLedger} onChange={setExpiresAfterLedger} placeholder="e.g. 2500000" />
-        <Field testid="label" label="Label" value={label} onChange={setLabel} placeholder="My vault" maxLength={64} showCounter />
+        <FormField
+          id="vault-amount"
+          testid="amount"
+          label="Amount"
+          type="number"
+          value={amount}
+          onChange={(e) => {
+            setAmount(e.target.value);
+            if (fieldErrors.amount) setFieldErrors((prev) => ({ ...prev, amount: undefined }));
+          }}
+          placeholder="1000000"
+          error={fieldErrors.amount}
+          accentColor="blue"
+          required
+        />
+        <FormField
+          id="vault-release-ledger"
+          testid="release-ledger"
+          label="Release Ledger"
+          type="number"
+          value={releaseLedger}
+          onChange={(e) => {
+            setReleaseLedger(e.target.value);
+            if (fieldErrors.releaseLedger) setFieldErrors((prev) => ({ ...prev, releaseLedger: undefined }));
+          }}
+          placeholder="e.g. 2000000"
+          error={fieldErrors.releaseLedger}
+          accentColor="blue"
+          required
+        />
+        <FormField
+          id="vault-expires-after-ledger"
+          testid="expires-after-ledger"
+          label="Expires After Ledger (optional)"
+          type="number"
+          value={expiresAfterLedger}
+          onChange={(e) => setExpiresAfterLedger(e.target.value)}
+          placeholder="e.g. 2500000"
+          accentColor="blue"
+        />
+        <FormField
+          id="vault-label"
+          testid="label"
+          label="Label"
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          placeholder="My vault"
+          maxLength={64}
+          showCounter
+          accentColor="blue"
+        />
         <button
           type="submit"
           disabled={txStatus === 'pending'}
@@ -105,31 +220,11 @@ export default function CreateVaultPage() {
           {txStatus === 'pending' ? 'Submitting...' : 'Create Vault'}
         </button>
       </form>
-      <TxToast status={txStatus} hash={txHash} message={txStatus === 'success' ? 'Vault created!' : errorMessage} onClose={() => setTxStatus(null)} />
-    </div>
-  );
-}
-
-function Field({ label, type = 'text', value, onChange, placeholder, maxLength, testid, showCounter }: {
-  label: string; type?: string; value: string; onChange: (v: string) => void; placeholder?: string; maxLength?: number; testid?: string; showCounter?: boolean;
-}) {
-  return (
-    <div>
-      <div className="flex justify-between mb-1">
-        <label className="block text-sm text-text-muted">{label}</label>
-        {showCounter && maxLength && (
-          <span className="text-xs text-text-muted">{value.length}/{maxLength}</span>
-        )}
-      </div>
-      <input
-        data-testid={testid}
-        type={type}
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        placeholder={placeholder}
-        maxLength={maxLength}
-        className="w-full px-3 py-2 rounded-lg border border-border bg-bg-card text-text-primary placeholder:text-text-muted/50 focus:outline-none focus:border-accent-blue transition-colors"
-        required
+      <TxToast
+        status={txStatus}
+        hash={txHash}
+        message={txStatus === 'success' ? 'Vault created!' : errorMessage}
+        onClose={() => setTxStatus(null)}
       />
     </div>
   );
