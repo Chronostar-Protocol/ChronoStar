@@ -1,5 +1,5 @@
 # ChronoStar — Product Requirements Document
-
+  
 > **Version**: 1.0.0  
 > **Organization**: Stellar-Ecosystem  
 > **Repos**: `Stellar-Ecosystem/chronostar` (main) · `Stellar-Ecosystem/chronostar-docs` (documentation site)  
