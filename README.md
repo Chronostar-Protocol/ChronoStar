@@ -32,7 +32,7 @@ Time-based payment primitives for the Stellar ecosystem: time-locked vaults, rec
 ┌──────────┐     ┌──────────┐     ┌──────────┐
 │  User    │────▶│ Frontend │────▶│  Backend │
 │ (Freighter)│   │ (Vercel) │     │ (Render) │
-└──────────┘     └──────────┘     └────┬─────┘
+└──────────┘     └──────────┘     └────┬─────┘  
                                        │
                               ┌────────▼────────┐
                               │  Soroban RPC     │
