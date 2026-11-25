@@ -61,7 +61,10 @@ export function TxToast({ hash, status, message, onClose }: TxToastProps) {
     >
       <div className="flex items-center gap-2">
         {status === "pending" && (
-          <span className="animate-spin w-4 h-4 border-2 border-current border-t-transparent rounded-full" />
+          <span
+            className="animate-spin motion-reduce:animate-none w-4 h-4 border-2 border-current border-t-transparent rounded-full"
+            aria-hidden="true"
+          />
         )}
         <span className="text-sm font-medium">{message || t.toast[status]}</span>
       </div>

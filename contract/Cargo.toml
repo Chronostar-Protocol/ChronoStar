@@ -7,6 +7,9 @@ members = [
 ]
 resolver = "2"
 
+[workspace.package]
+rust-version = "1.80.0"
+
 [workspace.dependencies]
 soroban-sdk = { version = "22.0.0" }
 

@@ -7,12 +7,13 @@ on:
     paths:
       - 'contract/Cargo.lock'
       - 'contract/Cargo.toml'
+      - 'package.json'
+      - 'package-lock.json'
       - 'keeper/package.json'
-      - 'keeper/package-lock.json'
       - 'backend/package.json'
-      - 'backend/package-lock.json'
+      - 'frontend/package.json'
       - 'docs/package.json'
-      - 'docs/package-lock.json'
+      - 'scripts/generate-license-inventory.js'
 
 jobs:
   cargo-audit:
@@ -38,6 +39,24 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: ${{ matrix.workspace }}/package-lock.json
+          cache-dependency-path: package-lock.json
       - run: npm audit
         working-directory: ${{ matrix.workspace }}
+
+  license-compliance:
+    name: Dependency License Inventory & Policy Check (#442)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Generate license inventory and verify compliance
+        run: node scripts/generate-license-inventory.js
+      - name: Upload dependency license inventory artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-license-inventory
+          path: |
+            license-inventory.md
+            license-inventory.json

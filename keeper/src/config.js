@@ -32,6 +32,15 @@ export const config = {
   retryMaxAttempts: parseInt(process.env.RETRY_MAX_ATTEMPTS || '5', 10),
   retryBaseDelayMs: parseInt(process.env.RETRY_BASE_DELAY_MS || '1000', 10),
   maintenanceWindow: parseMaintenanceWindow(process.env.MAINTENANCE_WINDOW_UTC),
+
+  // Fee budgeting configuration (#436)
+  maxFeeStroops: parseInt(process.env.MAX_FEE_STROOPS || '1000000', 10), // 0.1 XLM per-tx limit (0 for unlimited)
+  dailyFeeBudgetStroops: parseInt(process.env.DAILY_FEE_BUDGET_STROOPS || '50000000', 10), // 5 XLM daily limit (0 for unlimited)
+  feeStatePath: process.env.FEE_STATE_PATH || '.keeper-fee-budget.json',
+
+  // Durable execution journal configuration (#435)
+  journalPath: process.env.JOURNAL_PATH || '.keeper-journal.json',
+  journalMaxEntries: parseInt(process.env.JOURNAL_MAX_ENTRIES || '500', 10),
 };
 
 /**
@@ -67,6 +76,15 @@ export function validateConfig(cfg = config) {
   }
   if (!Number.isFinite(cfg.retryBaseDelayMs) || cfg.retryBaseDelayMs < 0) {
     errors.push('RETRY_BASE_DELAY_MS must be a non-negative number');
+  }
+  if (!Number.isFinite(cfg.maxFeeStroops) || cfg.maxFeeStroops < 0) {
+    errors.push('MAX_FEE_STROOPS must be a non-negative number');
+  }
+  if (!Number.isFinite(cfg.dailyFeeBudgetStroops) || cfg.dailyFeeBudgetStroops < 0) {
+    errors.push('DAILY_FEE_BUDGET_STROOPS must be a non-negative number');
+  }
+  if (!Number.isFinite(cfg.journalMaxEntries) || cfg.journalMaxEntries <= 0) {
+    errors.push('JOURNAL_MAX_ENTRIES must be a positive number');
   }
 
   if (errors.length > 0) {

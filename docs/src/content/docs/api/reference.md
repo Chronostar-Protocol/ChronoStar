@@ -114,3 +114,9 @@ All errors return:
 ```
 
 With appropriate HTTP status codes (400, 404, 500).
+
+---
+
+## Wire Format & Precision Handling
+
+ChronoStar API endpoints enforce strict precision standards for 64-bit and 128-bit integers (such as asset amounts and stream timestamps). See the [Soroban Wire-Format Guide](/ChronoStar/api/wire-format/) for full specifications on XDR decoding, Option/Enum serializations, and canonical string representations.
