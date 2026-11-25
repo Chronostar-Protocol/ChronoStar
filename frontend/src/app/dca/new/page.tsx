@@ -1,13 +1,14 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useWallet } from '@/lib/store';
 import { TxToast } from '@/components/TxToast';
 
 export default function CreateDCAPage() {
   const { address, isConnected } = useWallet();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [tokenIn, setTokenIn] = useState('');
   const [swapReceiver, setSwapReceiver] = useState('');
   const [totalBudget, setTotalBudget] = useState('');
@@ -17,6 +18,15 @@ export default function CreateDCAPage() {
   const [txStatus, setTxStatus] = useState<null | 'pending' | 'success' | 'error'>(null);
   const [txHash, setTxHash] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | undefined>();
+
+  useEffect(() => {
+    if (!searchParams.get('duplicate')) return;
+    setTokenIn(searchParams.get('tokenIn') ?? '');
+    setSwapReceiver(searchParams.get('swapReceiver') ?? '');
+    setTotalBudget(searchParams.get('totalBudget') ?? '');
+    setAmountPerSwap(searchParams.get('amountPerSwap') ?? '');
+    setIntervalLedgers(searchParams.get('intervalLedgers') ?? '');
+  }, [searchParams]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

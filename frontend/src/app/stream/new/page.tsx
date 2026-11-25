@@ -1,13 +1,14 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useWallet } from '@/lib/store';
 import { TxToast } from '@/components/TxToast';
 
 export default function CreateStreamPage() {
   const { address, isConnected } = useWallet();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [isMulti, setIsMulti] = useState(false);
   const [recipient, setRecipient] = useState('');
   const [recipients, setRecipients] = useState([{ address: '', amount: '' }]);
@@ -19,6 +20,14 @@ export default function CreateStreamPage() {
   const [txStatus, setTxStatus] = useState<null | 'pending' | 'success' | 'error'>(null);
   const [txHash, setTxHash] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | undefined>();
+
+  useEffect(() => {
+    if (!searchParams.get('duplicate')) return;
+    setRecipient(searchParams.get('recipient') ?? '');
+    setToken(searchParams.get('token') ?? '');
+    setTotalAmount(searchParams.get('totalAmount') ?? '');
+    // Duration is deliberately blank so a duplicated stream cannot inherit an expired end ledger.
+  }, [searchParams]);
 
   const handleTokenChange = (t: string) => {
     setToken(t);

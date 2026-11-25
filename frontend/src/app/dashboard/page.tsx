@@ -6,7 +6,7 @@ import { useWallet } from '@/lib/store';
 import { api, getApiErrorMessage } from '@/lib/api';
 import { DashboardSkeleton } from '@/components/Skeleton';
 import { useI18n } from '@/lib/i18n';
-import type { VaultEntry, StreamEntry, DCAEntry } from '@/types';
+import { dashboardSchedulesCsv, type VaultEntry, type StreamEntry, type DCAEntry } from '@/types';
 
 type Tab = 'vaults' | 'streams' | 'dca';
 type RoleFilter = 'all' | 'owner' | 'recipient';
@@ -27,6 +27,10 @@ function ErrorState({ message, onRetry }: { message: string; onRetry: () => void
       </button>
     </div>
   );
+}
+
+function isDashboardTab(value: string | null): value is Tab {
+  return value === 'vaults' || value === 'streams' || value === 'dca';
 }
 
 export default function DashboardPage() {
@@ -79,11 +83,31 @@ export default function DashboardPage() {
   }, [fetchData]);
 
   useEffect(() => {
-    const requestedTab = new URLSearchParams(window.location.search).get('tab');
-    if (requestedTab === 'vaults' || requestedTab === 'streams' || requestedTab === 'dca') {
-      setTab(requestedTab);
-    }
+    const syncTabFromUrl = () => {
+      const requestedTab = new URLSearchParams(window.location.search).get('tab');
+      setTab(isDashboardTab(requestedTab) ? requestedTab : 'vaults');
+    };
+    syncTabFromUrl();
+    window.addEventListener('popstate', syncTabFromUrl);
+    return () => window.removeEventListener('popstate', syncTabFromUrl);
   }, []);
+
+  const selectTab = useCallback((nextTab: Tab) => {
+    setTab(nextTab);
+    const url = new URL(window.location.href);
+    url.searchParams.set('tab', nextTab);
+    window.history.pushState({ tab: nextTab }, '', url);
+  }, []);
+
+  const downloadSchedulesCsv = useCallback(() => {
+    const blob = new Blob([dashboardSchedulesCsv(vaults, streams, dcas)], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'chronostar-dashboard-schedules.csv';
+    link.click();
+    URL.revokeObjectURL(url);
+  }, [vaults, streams, dcas]);
 
   if (!isConnected) {
     return (
@@ -194,6 +218,12 @@ export default function DashboardPage() {
           >
             New {tab === 'vaults' ? 'Vault' : tab === 'streams' ? 'Stream' : 'DCA'}
           </Link>
+          <button
+            onClick={downloadSchedulesCsv}
+            className="px-4 py-2 rounded-lg border border-border text-text-muted text-sm font-medium hover:text-text-primary transition-colors whitespace-nowrap"
+          >
+            Export CSV
+          </button>
         </div>
         <div>
           <h1 className="text-2xl font-heading font-bold text-text-primary">Dashboard</h1>
@@ -223,7 +253,7 @@ export default function DashboardPage() {
         {tabs.map((t) => (
           <button
             key={t.key}
-            onClick={() => setTab(t.key)}
+            onClick={() => selectTab(t.key)}
             className={`px-4 py-2 text-sm font-medium transition-colors ${
               tab === t.key
                 ? 'text-accent-blue border-b-2 border-accent-blue'
