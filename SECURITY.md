@@ -28,3 +28,12 @@ The security scope includes:
 - The frontend, including wallet connection, transaction construction, and user-facing security controls.
 
 Reports about third-party infrastructure, Stellar protocol behavior, or dependencies should explain how they create a security impact for ChronoStar. General feature requests, support questions, and non-security bugs should use the normal issue tracker.
+
+## Preventing accidental credentials
+
+Pull requests run a redacting secret scan. Never commit production seed phrases,
+private keys, API tokens, or `.env` files. If a scan flags a known nonfunctional
+fixture, replace it with an obviously invalid placeholder where possible; any
+exception must be narrowly documented in the pull request. Scan output should
+identify a file and rule but must not be copied into public reports with a
+suspected value.

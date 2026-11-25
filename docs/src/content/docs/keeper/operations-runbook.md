@@ -18,6 +18,8 @@ SOROBAN_RPC_URL="https://soroban-rpc.mainnet.stellar.org"
 KEEPER_SECRET_KEY="S..."
 POLL_INTERVAL_MS=15000
 MAX_FEE_STROOPS=100000
+# Optional: pause new submissions during a bounded UTC maintenance period.
+MAINTENANCE_WINDOW_UTC="2026-01-01T00:00:00Z/2026-01-01T01:00:00Z"
 ```
 
 ## Systemd Service Configuration
@@ -51,6 +53,16 @@ sudo systemctl start chronostar-keeper
 ```
 
 ## Monitoring & Health Checks
+
+## Scheduled Maintenance
+
+`MAINTENANCE_WINDOW_UTC` uses `START/END` ISO-8601 timestamps in UTC. The
+configured start must precede the end; invalid windows prevent the keeper from
+starting. A maintenance window is for pausing *new* submissions only. Keep the
+process and its health endpoints running so discovery, monitoring, and
+confirmation of already-submitted transactions continue. On exit, recheck
+on-chain eligibility before submitting overdue work because ledger deadlines
+continue advancing during maintenance.
 
 - **Health Endpoint**: `http://localhost:8080/health` (returns `200 OK` when active).
 - **Log Inspection**: `journalctl -u chronostar-keeper -f -o cat`
