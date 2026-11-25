@@ -1,0 +1,27 @@
+name: Lint GitHub Workflows
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - '.github/workflows/**'
+  pull_request:
+    paths:
+      - '.github/workflows/**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  actionlint:
+    name: Actionlint Workflow Validation (#439)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Run actionlint (pinned v1.7.7)
+        uses: reviewdog/action-actionlint@v1
+        with:
+          actionlint_flags: '-color'

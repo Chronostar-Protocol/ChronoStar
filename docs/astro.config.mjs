@@ -17,6 +17,7 @@ export default defineConfig({
           items: [
             { label: 'Overview', link: '/getting-started/overview/' },
             { label: 'Quickstart', link: '/getting-started/quickstart/' },
+            { label: 'Trustlines & Funding', link: '/getting-started/trustlines-and-funding/' },
           ],
         },
         {
@@ -44,6 +45,7 @@ export default defineConfig({
           label: 'API',
           items: [
             { label: 'REST Reference', link: '/api/reference/' },
+            { label: 'Wire Format Guide', link: '/api/wire-format/' },
           ],
         },
         {

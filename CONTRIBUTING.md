@@ -8,6 +8,8 @@ Thanks for your interest in contributing! ChronoStar is a Stellar Soroban protoc
 
 - **Node.js** >=22.0.0 (enforced across root and workspace engines; see `.nvmrc`)
 - **Rust** 1.84.0 pinned toolchain with the `wasm32-unknown-unknown` target
+- **Node.js** 22+
+- **Rust** 1.80.0+ (MSRV) with the `wasm32-unknown-unknown` target
   ```bash
   rustup target add wasm32-unknown-unknown
   ```
@@ -60,7 +62,7 @@ npm start
 - **Frontend fails to connect wallet** — make sure Freighter browser extension is installed and set to Testnet.
 - **Keeper fails with "simulation error"** — verify contract addresses in `.env` match the current Testnet deployment.
 
-## Running Tests
+## Running Tests & CI Checks
 
 ```bash
 # Contracts (all in workspace)
@@ -71,6 +73,7 @@ cd backend && npm test
 
 # Backend integration (requires Docker + Stellar CLI; spins up a local
 # Soroban sandbox, seeds the contracts, and runs supertest against the real routes)
+# Backend integration
 cd backend && npm run test:integration
 
 # Keeper
@@ -109,6 +112,16 @@ Strong copyleft or non-commercial licenses (such as standard GPL without linking
 To verify license compliance before submitting changes:
 ```bash
 npm run audit:licenses
+# Documentation Accessibility
+cd docs && npm run test:a11y
+
+# GitHub Actions Workflow Validation (#439)
+npm run lint:workflows
+# Or with actionlint:
+actionlint -color
+
+# WASM Bytecode Size Budgets (#438)
+npm run check:wasm-budget
 ```
 
 ## Branch & Commit Conventions

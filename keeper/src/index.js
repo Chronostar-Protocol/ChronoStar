@@ -20,6 +20,21 @@ async function main() {
   const client = new SorobanClient();
   await client.init();
 
+  // #434 — verify RPC network identity before enabling submissions
+  try {
+    await client.verifyNetworkIdentity();
+  } catch (err) {
+    logger.fatal({ err: err.message }, 'RPC network identity verification failed');
+    process.exit(1);
+  }
+
+  // #435 — reconcile in-flight transactions from journal upon restart
+  try {
+    await client.reconcileJournal();
+  } catch (err) {
+    logger.warn({ err: err.message }, 'Failed to reconcile journal at startup');
+  }
+
   // #267 — register with the coordinator before any watcher starts polling.
   await registerKeeper(client, config);
 

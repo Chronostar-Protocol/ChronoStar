@@ -1,51 +1,124 @@
 ---
 title: RecurringStream
-description: Stream tokens continuously to a recipient.
+description: Stream tokens continuously to a recipient with pause, resume, and split support.
 ---
 
 ## Overview
 
-RecurringStream lets you stream tokens to a recipient over time. The recipient can claim accrued amounts at any time. This is useful for:
+RecurringStream lets you stream tokens to a recipient over time. The recipient can claim accrued amounts at any time while the stream is active. This is useful for:
 
-- `*Salaries**`: Stream payroll continuously
-- `*Subscriptions**` : Pay for services by the second
-- `*Royalties**`: Auto-distribute revenue share
-- -**Salaries**: Stream payroll continuously
-- -**Subscriptions**: Pay for services by the second
-- -**Royalties**: Auto-distribute revenue share
+- **Salaries**: Stream payroll continuously
+- **Subscriptions**: Pay for services by the ledger
+- **Royalties**: Auto-distribute revenue share across multiple recipients
+
+---
 
 ## Vesting Math
 
+The contract computes continuous linear vesting on-chain using ledger sequences:
+
 ```
-vested = (total_amount * elapsed) / total_duration
-claimable = vested - claimed
+total_duration = end_ledger - start_ledger
+effective_ledger = min(current_ledger, end_ledger)
+total_elapsed = effective_ledger - start_ledger
+active_ledgers = total_elapsed - paused_ledgers
+vested_amount = (total_amount * active_ledgers) / total_duration
+claimable_amount = vested_amount - claimed_amount
 ```
 
-Where `elapsed = min(current_ledger, end_ledger) - start_ledger` and `total_duration = end_ledger - start_ledger`.
+When a stream is `Active`, `claimable_amount` is immediately withdrawable by the recipient. When a stream is `Paused`, **claims are strictly disabled** (`claimable_amount = 0`), and the keeper skips automated execution.
 
-When a stream is paused, accrual is computed over active intervals only. The paused interval is excluded from `elapsed`, so no tokens vest while the stream is halted. On resume, the accrual clock picks up from where it left off and the end ledger is extended by the paused duration.
+---
 
-## Statuses
+## Stream Pause Accounting: Worked Numerical Ledger Examples (#448)
 
-- `Active`: Streaming normally
-- `Paused`: Halted; no tokens accrue and the keeper skips it
-- `Completed`: End ledger reached and all tokens claimed
-- `Cancelled`: Stream terminated early
-## Cliff Period
+The following worked examples derive strictly from the implemented mathematical logic in `contract/recurring-stream/src/lib.rs` (`active_ledgers` and `claimable_amount`).
 
-A stream can optionally be created with a cliff (start delay). The cliff is specified in ledgers via `start_delay_ledgers` and is stored as `start_ledger = current_ledger + start_delay_ledgers`. No tokens accrue before `start_ledger`. This is useful for:
+### Baseline Stream Parameters for Examples
+- `start_ledger`: `1000`
+- `end_ledger`: `2000`
+- `total_duration`: `1000` ledgers
+- `total_amount`: `1,000,000` stroops (drip rate = `1,000` stroops per active ledger)
 
-- -**Trial periods**: Subscriptions that only begin accruing after a trial
-- -**Delayed salaries**: Streams that should not start until a start date
+---
 
-A `zero` delay reproduces the current behaviour exactly. Total duration is still calculated as `end_ledger - start_ledger`, so the drip rate is unchanged by the cliff.
+### Example 1: Single Mid-Stream Pause & Resume
+*(Cross-checked against contract test `test_claim_after_resume`)*
 
-## Interface
+1. **Active Run (Ledger 1000 → 1050)**:
+   - At ledger `1050`, the owner calls `pause(stream_id)`.
+   - `active_ledgers = 1050 - 1000 = 50` ledgers.
+   - Vested amount = `(1,000,000 * 50) / 1000 = 50,000` stroops (5% vested).
+   - `paused_at_ledger` is set to `1050`, status transitions to `Paused`.
+
+2. **During the Pause (Ledger 1051 → 1249)**:
+   - Time advances by 200 ledgers.
+   - Accrual is frozen: active ledgers remain strictly `50`.
+   - Calling `get_claimable` returns `0`. Calling `claim` fails with `Error::StreamNotActive`.
+
+3. **Resume (Ledger 1250)**:
+   - Owner calls `resume(stream_id)`.
+   - `pause_duration = 1250 - 1050 = 200` ledgers.
+   - `paused_ledgers` accumulated = `200`. `paused_at_ledger` reset to `0`. Status = `Active`.
+
+4. **Subsequent Accrual (Ledger 1450)**:
+   - At ledger `1450`, total wall-clock elapsed = `1450 - 1000 = 450` ledgers.
+   - `active_ledgers = 450 - 200 = 250` ledgers.
+   - Total vested = `(1,000,000 * 250) / 1000 = 250,000` stroops (25% vested).
+   - Recipient calls `claim()` and receives `250,000` stroops.
+
+---
+
+### Example 2: Repeated Pauses Across Multiple Intervals
+
+A stream undergoes two distinct pause periods before completion:
+
+| Ledger Event | Action | Wall-Clock Elapsed | Paused Ledgers Added | Total Paused Ledgers | Active Ledgers | Vested (stroops) | Claimable (stroops) |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| `1000` | Created | `0` | `0` | `0` | `0` | `0` | `0` |
+| `1200` | Pause #1 | `200` | Ongoing | `0` | `200` | `200,000` | `0` *(Paused)* |
+| `1300` | Resume #1 | `300` | `100` | `100` | `200` | `200,000` | `200,000` |
+| `1300` | Recipient claims | `300` | `0` | `100` | `200` | `200,000` | `0` *(Claimed)* |
+| `1500` | Pause #2 | `500` | Ongoing | `100` | `400` | `400,000` | `0` *(Paused)* |
+| `1650` | Resume #2 | `650` | `150` | `250` | `400` | `400,000` | `200,000` |
+| `1800` | Mid-stream check | `800` | `0` | `250` | `550` | `550,000` | `350,000` |
+
+---
+
+### Example 3: Pause Near and Across `end_ledger`
+
+What occurs if a stream is paused near its completion and remains paused past `end_ledger = 2000`?
+
+1. **Pause at Ledger 1950**:
+   - `paused_at_ledger = 1950`. Wall-clock elapsed = `950`.
+   - Active ledgers = `950`. Vested = `950,000` stroops.
+2. **Ledger Reaches 2100 (Past `end_ledger`)**:
+   - The owner resumes the stream at ledger `2100`.
+   - Contract clamps effective sequence: `effective_current = min(2100, 2000) = 2000`.
+   - `pause_duration = 2000 - 1950 = 50` ledgers.
+   - `paused_ledgers` = `50`.
+   - Active ledgers at completion: `(2000 - 1000) - 50 = 950` ledgers.
+   - Final vested amount = `950,000` stroops.
+3. **Unvested Balance Handling**:
+   - The remaining `50,000` stroops were never vested because the stream was inactive during those ledgers.
+   - If the owner cancels the stream via `cancel(stream_id)`, the recipient receives their unclaimed vested portion (`950,000 - claimed`), and the unvested `50,000` stroops are refunded to the stream owner.
+
+---
+
+### Recipient Guarantees & Semantic Notes
+
+1. **Non-Dilution Guarantee**: Every active ledger that elapsed guarantees the recipient `total_amount / total_duration` tokens. Pausing never revokes already vested tokens.
+2. **Zero In-Pause Claims**: Calling `claim()` while paused returns `Error::StreamNotActive`. This prevents front-running pause decisions.
+3. **Completion Semantics**: In the Soroban implementation, `end_ledger` is immutable. Paused ledgers reduce the total active ledgers accrued before `end_ledger`. Unaccrued balances remain available for owner cancellation refund.
+
+---
+
+## Contract Interface
 
 ### `create_stream`
 
 ```rust
-fn create_stream(
+pub fn create_stream(
     env: Env,
     owner: Address,
     recipient: Address,
@@ -56,96 +129,32 @@ fn create_stream(
     label: String,
 ) -> u64
 ```
+Transfers `total_amount` from `owner` to the contract. Accrual begins at `start_ledger = current_ledger + start_delay_ledgers`.
 
-Creates a new stream. Transfers `total_amount` from owner to the contract. The stream begins accruing at `start_ledger = current_ledger + start_delay_ledgers`.
-
-- Minimum duration: 60 ledgers (~5 minutes)
-- `total_amount` must be positive
-- `start_delay_ledgers` may be zero (no cliff)
-
-### `create_split_stream`
+### `pause`
 
 ```rust
-fn create_split_stream(
-    env: Env,
-    owner: Address,
-    splits: Vec<StreamSplit>, // { recipient: Address, share: u16 }
-    token: Address,
-    total_amount: i128,
-    duration_ledgers: u32,
-    label: String,
-) -> u64
+pub fn pause(env: Env, stream_id: u64)
 ```
+Halts an `Active` stream. Stores current ledger sequence in `paused_at_ledger`. Requires owner authentication.
 
-Creates a new stream with multiple recipients. `share` is in basis points and total shares must equal exactly 10 000. Rounding dust is automatically distributed to the last recipient on each claim.
+### `resume`
+
+```rust
+pub fn resume(env: Env, stream_id: u64)
+```
+Resumes a `Paused` stream. Accrues completed pause interval into `paused_ledgers`. Requires owner authentication.
 
 ### `claim`
 
 ```rust
-fn claim(env: Env, caller: Address, stream_id: u64) -> i128
-fn claim(env: Env, stream_id: u64) -> i129
+pub fn claim(env: Env, caller: Address, stream_id: u64) -> i128
 ```
-
-Claims the currently vested amount for the recipient. Returns the amount claimed. Claiming before the cliff (`current_ledger < start_ledger`) fails with a clear error rather than returning nothing to claim.
-
-### `tick`
-
-```rust
-fn tick(env: Env, stream_id: u64)
-```
-
-Updates stream status to Completed if `current_ledger >= end_ledger` and all tokens claimed. Called by the keeper. The keeper `StreamWatcher` skips streams in the `Paused` status.
-
-### `pause`**
-```rust
-fn pause(env: Env, stream_id: u64)
-```
-
-Halts an `Active` stream. Stores the current ledger in `paused_at_ledger` and sets the status to `Paused`. No tokens accrue while paused. Only the owner may pause.
-
-### `resume`**
-```rust
-fn resume(env: Env, stream_id: u64)
-```
-
-Resumes a `Paused` stream. The end ledger is extended by the number of ledgers spent paused so the remaining accrual schedule is preserved. Only the owner may resume.
+Claims accrued claimable tokens for caller. Fails if stream is `Paused` or caller is not authorized.
 
 ### `cancel`
 
 ```rust
-fn cancel(env: Env, stream_id: u64)
+pub fn cancel(env: Env, stream_id: u64)
 ```
-
-Cancels the stream. Recipient gets their vested amount, owner gets the remainder. Works from both `Active` and `Paused` statuses; when cancelling from `Paused` the refund is computed over active intervals only.
-
-### `get_stream`
-
-```rust
-fn get_stream(env: Env, stream_id: u64) -> Option<StreamEntry>
-```
-
-### `get_claimable`
-
-```rust
-fn get_claimable(env: Env, stream_id: u64) -> i129
-```
-
-## Events
-
-Every event uses two topics: the event name and the stream ID.
-
-- `created` — published by `create_stream`. Data is `StreamCreated { owner, end_ledger }`.
-- `claimed` — published by `claim`. Data is the claimed amount.
-- `completed` — published by `claim` and `tick` when the stream finishes. Data is the recipient address.
-- `cancelled` — published by `cancel`. Data is the owner address.
-
-## Testing
-
-```bash
-cd contract
-cargo test -p recurring-stream
-```
-
-All 7 tests must pass.
-All tests must pass, including a property-style test asserting total vested never exceeds `total_amount` across a pause/resume cycle.
-All tests must pass, including tests for pre-cliff claim rejection and a post-cliff partial claim.
+Terminates stream. Disburses vested tokens to recipient and refunds unvested balance to owner.

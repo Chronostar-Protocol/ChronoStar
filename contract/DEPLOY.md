@@ -3,6 +3,7 @@
 ## Prerequisites
 
 - **Rust**: Pinned to `1.84.0` (see `contract/rust-toolchain.toml`) with the `wasm32-unknown-unknown` target:
+- **Rust**: With `wasm32-unknown-unknown` target
   ```bash
   rustup target add wasm32-unknown-unknown
   ```
@@ -14,6 +15,24 @@
 ## Reproducible Contract Compilation (#444)
 
 All ChronoStar smart contracts are deterministically compiled using pinned Rust toolchains and standardized release profile optimizations:
+## Contract WASM Size Budgets (#438)
+
+To ensure deployability and prevent out-of-gas or deployment rejections on the Stellar network, all contract bytecode artifacts are subject to explicit size budgets:
+
+| Contract | Maximum Size Budget | Description |
+| :--- | :--- | :--- |
+| `schedule_vault.wasm` | **64 KB** (65,536 B) | Time-locked escrow vault |
+| `recurring_stream.wasm` | **64 KB** (65,536 B) | Linear vesting payment streams |
+| `dca_policy.wasm` | **64 KB** (65,536 B) | Dollar-cost averaging policy execution |
+| `keeper_coordinator.wasm` | **48 KB** (49,152 B) | Decentralized keeper coordination ledger |
+
+### Enforcing Size Budgets
+
+To verify contract sizes locally against configured budgets:
+```bash
+npm run check:wasm-budget
+```
+CI automatically builds optimized release artifacts and enforces these budgets on every pull request (`.github/workflows/test-contracts.yml`).
 
 - **Optimization Level**: `opt-level = "z"` (optimized for WASM code size)
 - **LTO**: Full Link-Time Optimization (`lto = true`)
