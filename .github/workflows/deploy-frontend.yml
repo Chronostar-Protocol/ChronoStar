@@ -55,6 +55,15 @@ jobs:
         working-directory: frontend
       - run: npm run test:e2e
         working-directory: frontend
+      - name: Upload Playwright traces and failure artifacts (#440)
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-failure-artifacts
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
+          retention-days: 7
 
   build:
     runs-on: ubuntu-latest

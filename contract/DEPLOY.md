@@ -2,10 +2,33 @@
 
 ## Prerequisites
 
+- **Rust**: With `wasm32-unknown-unknown` target
+  ```bash
+  rustup target add wasm32-unknown-unknown
+  ```
+- **Stellar CLI**: Installed via cargo:
+  ```bash
+  cargo install --locked stellar-cli --features opt
+  ```
+
+## Contract WASM Size Budgets (#438)
+
+To ensure deployability and prevent out-of-gas or deployment rejections on the Stellar network, all contract bytecode artifacts are subject to explicit size budgets:
+
+| Contract | Maximum Size Budget | Description |
+| :--- | :--- | :--- |
+| `schedule_vault.wasm` | **64 KB** (65,536 B) | Time-locked escrow vault |
+| `recurring_stream.wasm` | **64 KB** (65,536 B) | Linear vesting payment streams |
+| `dca_policy.wasm` | **64 KB** (65,536 B) | Dollar-cost averaging policy execution |
+| `keeper_coordinator.wasm` | **48 KB** (49,152 B) | Decentralized keeper coordination ledger |
+
+### Enforcing Size Budgets
+
+To verify contract sizes locally against configured budgets:
 ```bash
-rustup target add wasm32-unknown-unknown
-cargo install --locked stellar-cli --features opt
+npm run check:wasm-budget
 ```
+CI automatically builds optimized release artifacts and enforces these budgets on every pull request (`.github/workflows/test-contracts.yml`).
 
 ## Build All Contracts
 
@@ -52,7 +75,17 @@ stellar contract deploy \
 ```
 → Copy printed contract ID → `DCA_CONTRACT_ID`
 
-### 5. Configure DEX routers (Multi-Asset DCA)
+### 5. Deploy KeeperCoordinator
+
+```bash
+stellar contract deploy \
+  --wasm keeper-coordinator/target/wasm32-unknown-unknown/release/keeper_coordinator.wasm \
+  --source deployer \
+  --network testnet
+```
+→ Copy printed contract ID → `COORDINATOR_CONTRACT_ID`
+
+### 6. Configure DEX routers (Multi-Asset DCA)
 
 The DCAPolicy contract reads Soroswap/Phoenix router addresses from its `Config` key.
 After deploying (or upgrading to) the multi-asset build, point `set_config` at the
@@ -92,5 +125,6 @@ Copy secret key → `KEEPER_SECRET`
 | ScheduleVault | `C...` |
 | RecurringStream | `C...` |
 | DCAPolicy | `C...` |
+| KeeperCoordinator | `C...` |
 
 > **Mainnet**: Replace `--network testnet` with `--network mainnet` and update env vars.
