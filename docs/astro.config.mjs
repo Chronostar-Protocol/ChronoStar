@@ -7,6 +7,7 @@ export default defineConfig({
   integrations: [
     starlight({
       title: 'ChronoStar',
+      
       description: 'Time-based payment primitives for the Stellar ecosystem.',
       logo: { src: './src/assets/chronostar-logo-lockup.svg' },
       social: { github: 'https://github.com/Chronostar-Protocol/ChronoStar' },
