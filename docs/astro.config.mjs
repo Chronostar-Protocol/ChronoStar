@@ -17,6 +17,7 @@ export default defineConfig({
           items: [
             { label: 'Overview', link: '/getting-started/overview/' },
             { label: 'Quickstart', link: '/getting-started/quickstart/' },
+            { label: 'Trustlines & Funding', link: '/getting-started/trustlines-and-funding/' },
           ],
         },
         {
@@ -29,6 +30,12 @@ export default defineConfig({
           ],
         },
         {
+          label: 'Operations & Runbooks',
+          items: [
+            { label: 'Testnet Reset Recovery', link: '/operations/testnet-reset-recovery/' },
+          ],
+        },
+        {
           label: 'Keeper',
           items: [
             { label: 'Self-Hosting', link: '/keeper/self-hosting/' },
@@ -38,12 +45,14 @@ export default defineConfig({
           label: 'API',
           items: [
             { label: 'REST Reference', link: '/api/reference/' },
+            { label: 'Wire Format Guide', link: '/api/wire-format/' },
           ],
         },
         {
           label: 'Integration',
           items: [
             { label: 'Lodestar', link: '/integration/lodestar/' },
+            { label: 'Executable examples', link: '/integration/executable-examples/' },
           ],
         },
       ],

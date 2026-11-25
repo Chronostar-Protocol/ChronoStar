@@ -7,7 +7,8 @@ import { api, getApiErrorMessage } from '@/lib/api';
 import { useWallet } from '@/lib/store';
 import { TxToast } from '@/components/TxToast';
 import { DetailPageSkeleton } from '@/components/Skeleton';
-import type { VaultEntry } from '@/types';
+import { ShareModal } from '@/components/ShareModal';
+import { scheduleDuplicateHref, type VaultEntry } from '@/types';
 
 export default function VaultDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -15,6 +16,7 @@ export default function VaultDetailPage() {
   const [vault, setVault] = useState<VaultEntry | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
   const activeRequest = useRef<AbortController | null>(null);
   const [txStatus, setTxStatus] = useState<null | 'pending' | 'success' | 'error'>(null);
 
@@ -82,7 +84,17 @@ export default function VaultDetailPage() {
 
   return (
     <div className="max-w-lg mx-auto">
-      <Link href="/dashboard" className="text-sm text-accent-blue hover:underline">&larr; Dashboard</Link>
+      <div className="flex items-center justify-between">
+        <Link href="/dashboard" className="text-sm text-accent-blue hover:underline">&larr; Dashboard</Link>
+        <div className="flex gap-2">
+          <Link href={scheduleDuplicateHref(vault)} className="text-xs px-3 py-1 rounded border border-border hover:bg-bg-card transition-colors text-text-muted">
+            Duplicate
+          </Link>
+          <button onClick={() => setShareOpen(true)} className="text-xs px-3 py-1 rounded border border-border hover:bg-bg-card transition-colors text-text-muted">
+            Share QR
+          </button>
+        </div>
+      </div>
       <h1 className="text-2xl font-heading font-bold text-text-primary mt-4 mb-6">Vault #{vault.id}</h1>
 
       <div className="space-y-3 p-4 rounded-lg border border-border bg-bg-card">
@@ -90,6 +102,7 @@ export default function VaultDetailPage() {
         <DetailRow label="Recipient" value={vault.recipient} />
         <DetailRow label="Amount" value={vault.amount} />
         <DetailRow label="Release Ledger" value={String(vault.release_ledger)} />
+        <DetailRow label="Expires After Ledger" value={vault.expires_after_ledger ? String(vault.expires_after_ledger) : "None (No Expiry)"} />
         <DetailRow label="Status" value={vault.status} />
       </div>
 
@@ -101,6 +114,13 @@ export default function VaultDetailPage() {
           Cancel Vault
         </button>
       )}
+
+      <ShareModal
+        title={`Vault #${vault.id}`}
+        url={typeof window !== 'undefined' ? window.location.href : ''}
+        isOpen={shareOpen}
+        onClose={() => setShareOpen(false)}
+      />
 
       <TxToast status={txStatus} onClose={() => setTxStatus(null)} />
     </div>

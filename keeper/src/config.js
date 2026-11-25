@@ -1,3 +1,21 @@
+export function parseMaintenanceWindow(value) {
+  if (!value) return null;
+  const [startText, endText, ...extra] = value.split('/');
+  const start = new Date(startText);
+  const end = new Date(endText);
+  if (
+    extra.length > 0 ||
+    !startText?.endsWith('Z') ||
+    !endText?.endsWith('Z') ||
+    Number.isNaN(start.getTime()) ||
+    Number.isNaN(end.getTime()) ||
+    start >= end
+  ) {
+    throw new Error('MAINTENANCE_WINDOW_UTC must be START/END UTC timestamps with start before end');
+  }
+  return { start, end };
+}
+
 export const config = {
   keeperSecret: process.env.KEEPER_SECRET || '',
   vaultContractId: process.env.VAULT_CONTRACT_ID || '',
@@ -13,6 +31,16 @@ export const config = {
   logLevel: process.env.LOG_LEVEL || 'info',
   retryMaxAttempts: parseInt(process.env.RETRY_MAX_ATTEMPTS || '5', 10),
   retryBaseDelayMs: parseInt(process.env.RETRY_BASE_DELAY_MS || '1000', 10),
+  maintenanceWindow: parseMaintenanceWindow(process.env.MAINTENANCE_WINDOW_UTC),
+
+  // Fee budgeting configuration (#436)
+  maxFeeStroops: parseInt(process.env.MAX_FEE_STROOPS || '1000000', 10), // 0.1 XLM per-tx limit (0 for unlimited)
+  dailyFeeBudgetStroops: parseInt(process.env.DAILY_FEE_BUDGET_STROOPS || '50000000', 10), // 5 XLM daily limit (0 for unlimited)
+  feeStatePath: process.env.FEE_STATE_PATH || '.keeper-fee-budget.json',
+
+  // Durable execution journal configuration (#435)
+  journalPath: process.env.JOURNAL_PATH || '.keeper-journal.json',
+  journalMaxEntries: parseInt(process.env.JOURNAL_MAX_ENTRIES || '500', 10),
 };
 
 /**
@@ -48,6 +76,15 @@ export function validateConfig(cfg = config) {
   }
   if (!Number.isFinite(cfg.retryBaseDelayMs) || cfg.retryBaseDelayMs < 0) {
     errors.push('RETRY_BASE_DELAY_MS must be a non-negative number');
+  }
+  if (!Number.isFinite(cfg.maxFeeStroops) || cfg.maxFeeStroops < 0) {
+    errors.push('MAX_FEE_STROOPS must be a non-negative number');
+  }
+  if (!Number.isFinite(cfg.dailyFeeBudgetStroops) || cfg.dailyFeeBudgetStroops < 0) {
+    errors.push('DAILY_FEE_BUDGET_STROOPS must be a non-negative number');
+  }
+  if (!Number.isFinite(cfg.journalMaxEntries) || cfg.journalMaxEntries <= 0) {
+    errors.push('JOURNAL_MAX_ENTRIES must be a positive number');
   }
 
   if (errors.length > 0) {

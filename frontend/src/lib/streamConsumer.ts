@@ -88,7 +88,15 @@ export class StreamConsumer {
   }
 
   private notify(data: StreamUpdateData): void {
-    this.listeners.forEach((callback) => callback(data));
+    this.listeners.forEach((callback) => {
+      try {
+        callback(data);
+      } catch (err) {
+        // A consumer must not be able to prevent other subscribers from
+        // receiving this server-sent event.
+        console.error("Stream subscriber failed", err);
+      }
+    });
   }
 
   private scheduleReconnect(): void {

@@ -7,9 +7,11 @@ description: Lock funds and release at a future ledger.
 
 ScheduleVault lets you lock tokens and release them to a recipient at a specific future ledger. This is useful for:
 
-- -- **Vesting**: Lock tokens for a team member, release after a cliff
-- -- **Escrow**: Hold funds until a condition is met
-- - **Deferred payroll**: Pre-fund payroll, release on payday
+- **Vesting**: Lock tokens for a team member, release after a cliff
+- **Escrow**: Hold funds until a condition is met
+- **Deferred payroll**: Pre-fund payroll, release on payday
+
+---
 
 ## Interface
 
@@ -48,21 +50,7 @@ fn create_vaults(
 ) -> Vec<u64>
 ```
 
-Creates one vault per recipient in a single transaction. Every vault shares the same `token`, `amount`, and `release_ledger`, so the keeper needs a single due-check pass over the returned vault IDs. Returns the new vault IDs in the same order as `recipients`.
-
-- `owner.require_auth()` — owner must authorize
-- `recipients.len()` must be between 1 and `MAX_BATCH_SIZE`
-- `amount` must be positive
-- `release_ledger` must be in the future
-- each label is formed from `label_prefix` plus the recipient index, max 64 characters
-
-### `MAX_BATCH_SIZE`
-
-```rust
-const MAX_BATCH_SIZE: u32 = 32;
-```
-
-Caps the number of recipients a single `create_vaults` call may create, protecting the resource budget of the transaction.
+Creates N vaults for multi-recipient disbursements sharing one release ledger and amount.
 
 ### `release`
 
@@ -70,7 +58,7 @@ Caps the number of recipients a single `create_vaults` call may create, protecti
 fn release(env: Env, vault_id: u64)
 ```
 
-Releases the locked tokens to the recipient. Only callable when `current_ledger >= release_ledger` and vault is Active.
+Releases locked tokens to the recipient. Can be called by anyone (keeper or recipient) once `current_ledger >= release_ledger`.
 
 ### `cancel`
 
@@ -78,26 +66,7 @@ Releases the locked tokens to the recipient. Only callable when `current_ledger 
 fn cancel(env: Env, vault_id: u64)
 ```
 
-Cancels the vault and returns tokens to the owner. Only callable before `release_ledger`. Requires owner auth.
-
-### `transfer_ownership`
-
-```rust
-fn transfer_ownership(env: Env, vault_id: u64, new_owner: Address)
-```
-
-Transfers control of the vault to `new_owner`. The recipient remains unchanged. The new owner becomes the funder, gaining the ability to cancel the vault and claim the tokens, or transfer ownership again. The old owner loses these rights immediately.
-
-- Requires current owner auth
-- Only allowed on `Active` vaults
-
-## Owner vs Recipient
-
-```mermaid
-flowchart LR
-    Owner[Owner (Funder)] -- "Funds vault\nCan cancel/transfer" --> Vault
-    Vault -- "Releases funds" --> Recipient[Recipient (Payee)]
-```
+Cancels the vault and refunds tokens to the owner. Only the owner may call this, and only while the vault is `Active`.
 
 ### `get_vault`
 
@@ -111,6 +80,8 @@ fn get_vault(env: Env, vault_id: u64) -> Option<VaultEntry>
 fn get_vaults_by_owner(env: Env, owner: Address) -> Vec<u64>
 ```
 
+---
+
 ## States
 
 | Status | Meaning |
@@ -118,6 +89,14 @@ fn get_vaults_by_owner(env: Env, owner: Address) -> Vec<u64>
 | `Active` | Tokens are locked, waiting for release ledger |
 | `Released` | Tokens have been transferred to recipient |
 | `Cancelled` | Tokens have been returned to owner |
+
+---
+
+## Recipient Readiness & Trustlines
+
+When creating vaults holding issued assets (such as USDC), the recipient address must have established an active trustline and hold sufficient base reserves before `release` executes. If a classic recipient account lacks a trustline for the token, the release transfer will fail on-chain. Refer to the [Token Trustlines & Recipient Readiness Guide](../../getting-started/trustlines-and-funding/) to verify destination accounts before locking funds.
+
+---
 
 ## Events
 
@@ -127,6 +106,8 @@ Every event uses two topics: the event name and the vault ID.
 - `released` — published by `release`. Data is the recipient address.
 - `cancelled` — published by `cancel`. Data is the owner address.
 
+---
+
 ## Testing
 
 ```bash
@@ -134,9 +115,4 @@ cd contract
 cargo test -p schedule-vault
 ```
 
-All 7 tests must pass.
-All tests must pass, including the batch creation coverage for a 3-recipient batch, an empty batch, and a batch over `MAX_BATCH_SIZE`.
-
-## Footprint notes
-
-`create_vaults` writes one vault entry plus one owner-index entry per recipient, so a batch of `N` costs `O(N`) entries and a corresponding increase in transaction resource usage. bMAX_BATCH_SIZE` bounds the worst-case entry count so the call remains within the resource budget; callers needing larger disbursements split them into multiple batches.
+All tests must pass, including batch creation coverage for multi-recipient disbursements.

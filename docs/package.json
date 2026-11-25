@@ -2,10 +2,15 @@
   "name": "chronostar-docs",
   "version": "1.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "scripts": {
     "dev": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
+    "test": "node --test scripts/*.test.js",
+    "test:a11y": "node scripts/check-a11y.js",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "postinstall": "patch-package"
