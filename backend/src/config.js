@@ -9,6 +9,8 @@ export const config = {
   port: parseInt(process.env.PORT || '3001', 10),
   trustProxy: parseTrustProxy(process.env.TRUST_PROXY),
   publicBaseUrl: process.env.PUBLIC_BASE_URL?.replace(/\/$/, '') || '',
+  maxSseConnections: parseInt(process.env.MAX_SSE_CONNECTIONS || '100', 10),
+  maxSsePerIp: parseInt(process.env.MAX_SSE_PER_IP || '10', 10),
 };
 
 const CONTRACT_ID_VARS = [
@@ -49,6 +51,14 @@ export function getConfigProblems(cfg = config) {
 
   if (!cfg.networkPassphrase) {
     problems.push('STELLAR_NETWORK_PASSPHRASE must not be empty');
+  }
+
+  if (!Number.isInteger(cfg.maxSseConnections) || cfg.maxSseConnections < 1) {
+    problems.push('MAX_SSE_CONNECTIONS must be a whole number greater than 0');
+  }
+
+  if (!Number.isInteger(cfg.maxSsePerIp) || cfg.maxSsePerIp < 1) {
+    problems.push('MAX_SSE_PER_IP must be a whole number greater than 0');
   }
 
   return problems;

@@ -309,6 +309,12 @@ paths:
 
                 event: schedule-update
                 data: {"timestamp":"2026-10-22T09:00:00.000Z","status":"ok","vaultCount":3}
+        "429":
+          description: Concurrent stream connection limit exceeded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /api/openapi.json:
     get:

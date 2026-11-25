@@ -25,6 +25,7 @@ export class SorobanClient {
     const isInsecureHttp = config.rpcUrl.startsWith("http://");
     this.server = new rpc.Server(config.rpcUrl, { allowHttp: isInsecureHttp });
     this.networkPassphrase = config.networkPassphrase;
+    this.inflight = new Map();
   }
 
   async simulate(contractId, method, args) {
@@ -44,16 +45,30 @@ export class SorobanClient {
   }
 
   async readContract(contractId, method, args) {
-    const sim = await this.simulate(contractId, method, args);
-    if (rpc.Api.isSimulationError(sim) || sim?.error) {
-      const diagnostic =
-        typeof sim?.error === "string"
-          ? sim.error
-          : sim?.error?.message || sim?.error?.toString?.() || "unknown RPC error";
-      throw new ContractSimulationError(diagnostic);
+    const key = `${this.networkPassphrase}:${contractId}:${method}:${JSON.stringify(args, (_, v) => (typeof v === "bigint" ? v.toString() : v))}`;
+    if (this.inflight.has(key)) {
+      return this.inflight.get(key);
     }
-    if (!sim?.result?.retval) return null;
-    return normalizeNative(scValToNative(sim.result.retval));
+
+    const promise = (async () => {
+      try {
+        const sim = await this.simulate(contractId, method, args);
+        if (rpc.Api.isSimulationError(sim) || sim?.error) {
+          const diagnostic =
+            typeof sim?.error === "string"
+              ? sim.error
+              : sim?.error?.message || sim?.error?.toString?.() || "unknown RPC error";
+          throw new ContractSimulationError(diagnostic);
+        }
+        if (!sim?.result?.retval) return null;
+        return normalizeNative(scValToNative(sim.result.retval));
+      } finally {
+        this.inflight.delete(key);
+      }
+    })();
+
+    this.inflight.set(key, promise);
+    return promise;
   }
 
   scvU64(val) {

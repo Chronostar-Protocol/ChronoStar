@@ -13,6 +13,7 @@
     "format:check": "prettier --check .",
     "test": "node --test src/",
     "test:integration": "node --test --test-concurrency=1 test/integration.test.js",
+    "test:load": "node scripts/ci-load-test.js"
     "store:backup": "node scripts/event-store-backup.js backup",
     "store:restore": "node scripts/event-store-backup.js restore"
   },
