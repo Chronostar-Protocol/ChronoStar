@@ -49,6 +49,8 @@ export interface ContractTxOptions {
   contractId?: string;
   currentLedger?: number | bigint;
   skipSimulation?: boolean;
+  /** Receives the simulated network fee before the wallet signing request opens. */
+  onFeeEstimate?: (fee: string) => void;
 }
 
 const MAX_I128 = (1n << 127n) - 1n;
@@ -191,6 +193,7 @@ export async function buildAndSignContractTx(
     .build();
 
   const preparedTx = options?.skipSimulation ? tx : await server.prepareTransaction(tx);
+  if (!options?.skipSimulation) options?.onFeeEstimate?.(preparedTx.fee);
 
   const signedXdr = await signer(preparedTx.toXDR(), { networkPassphrase });
   if (!signedXdr) {

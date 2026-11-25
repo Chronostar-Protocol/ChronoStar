@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { fetchLatestLedger } from "@/lib/ledger";
+import { fetchLatestLedger, subscribeToLatestLedger } from "@/lib/ledger";
 import { SECONDS_PER_LEDGER } from "@/lib/network";
 
 interface CurrentLedgerProps {
@@ -17,18 +17,27 @@ interface CurrentLedgerProps {
  * RPC cannot be reached, it says so instead of showing a placeholder number.
  */
 export function CurrentLedger({
-  pollMs = SECONDS_PER_LEDGER * 1000,
-  loadLedger = () => fetchLatestLedger(),
+  pollMs,
+  loadLedger,
   className = "",
 }: CurrentLedgerProps) {
   const [ledger, setLedger] = useState<number | null>(null);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
+    if (!loadLedger && !pollMs) {
+      return subscribeToLatestLedger(({ ledger: next, failed: nextFailed }) => {
+        if (next !== null) setLedger(next);
+        setFailed(nextFailed);
+      });
+    }
+
     let cancelled = false;
+    const intervalMs = pollMs ?? SECONDS_PER_LEDGER * 1000;
+    const loader = loadLedger ?? (() => fetchLatestLedger());
     const refresh = async () => {
       try {
-        const next = await loadLedger();
+        const next = await loader();
         if (cancelled) return;
         setLedger(next);
         setFailed(false);
@@ -37,14 +46,12 @@ export function CurrentLedger({
       }
     };
     refresh();
-    const timer = setInterval(refresh, pollMs);
+    const timer = setInterval(refresh, intervalMs);
     return () => {
       cancelled = true;
       clearInterval(timer);
     };
-    // loadLedger is expected to be stable for the component's lifetime.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pollMs]);
+  }, [pollMs, loadLedger]);
 
   const text = ledger !== null ? ledger.toLocaleString("en-US") : failed ? "unavailable" : "…";
 
