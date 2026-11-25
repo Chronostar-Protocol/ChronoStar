@@ -17,7 +17,7 @@
     "store:restore": "node scripts/event-store-backup.js restore"
   },
   "dependencies": {
-    "@stellar/stellar-sdk": "^13.0.0",
+    "@stellar/stellar-sdk": "^17.2.1",
     "cors": "^2.8.5",
     "express": "^4.19.2",
     "express-rate-limit": "^8.7.0",
