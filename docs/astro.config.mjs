@@ -30,6 +30,12 @@ export default defineConfig({
           ],
         },
         {
+          label: 'Operations & Runbooks',
+          items: [
+            { label: 'Testnet Reset Recovery', link: '/operations/testnet-reset-recovery/' },
+          ],
+        },
+        {
           label: 'Keeper',
           items: [
             { label: 'Self-Hosting', link: '/keeper/self-hosting/' },

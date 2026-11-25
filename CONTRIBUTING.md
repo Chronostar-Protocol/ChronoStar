@@ -6,6 +6,8 @@ Thanks for your interest in contributing! ChronoStar is a Stellar Soroban protoc
 
 ## Prerequisites
 
+- **Node.js** >=22.0.0 (enforced across root and workspace engines; see `.nvmrc`)
+- **Rust** 1.84.0 pinned toolchain with the `wasm32-unknown-unknown` target
 - **Node.js** 22+
 - **Rust** 1.80.0+ (MSRV) with the `wasm32-unknown-unknown` target
   ```bash
@@ -63,18 +65,53 @@ npm start
 ## Running Tests & CI Checks
 
 ```bash
-# Contracts (all three in workspace)
+# Contracts (all in workspace)
 cd contract && cargo test
 
 # Backend
 cd backend && npm test
 
+# Backend integration (requires Docker + Stellar CLI; spins up a local
+# Soroban sandbox, seeds the contracts, and runs supertest against the real routes)
 # Backend integration
 cd backend && npm run test:integration
 
 # Keeper
 cd keeper && npm test
 
+# Node engines validation
+npm run check:engines
+
+# Dependency license inventory & policy audit
+npm run audit:licenses
+```
+
+## Open Source Dependency License Policy (#442)
+
+ChronoStar enforces an explicit dependency license compliance policy across all npm workspaces and Cargo crates to protect contributors, users, and downstream integrators.
+
+### Allowed Permissive Licenses
+Dependencies governed by standard permissive open-source licenses are automatically approved:
+- `MIT`, `MIT-0`
+- `Apache-2.0`
+- `BSD-2-Clause`, `BSD-3-Clause`
+- `ISC`
+- `CC0-1.0`, `0BSD`, `Unlicense`
+- `BlueOak-1.0.0`
+- `Python-2.0`, `Zlib`
+
+### Scoped Exceptions Policy
+Certain dependencies with non-permissive or specialized licenses are permitted under strictly scoped rationales:
+- **`MPL-2.0`**: Permitted strictly for build-time license identifier registries (`spdx-license-ids`) and accessibility test runners (`axe-core`).
+- **`CC-BY-4.0`**: Permitted for browser compatibility and styling datasets (`caniuse-lite`).
+- **`LGPL-3.0-or-later`**: Permitted for isolated binary prebuilds (`sharp-libvips`) used solely during static site documentation generation and compiler WASM helpers (`@swc/wasm`).
+
+### Prohibited Licenses
+Strong copyleft or non-commercial licenses (such as standard GPL without linking exceptions, AGPL, SSPL, or proprietary commercial licenses) are rejected by CI.
+
+To verify license compliance before submitting changes:
+```bash
+npm run audit:licenses
 # Documentation Accessibility
 cd docs && npm run test:a11y
 
